@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { LuMenu, LuMinus, LuSquare, LuX } from 'react-icons/lu';
 import { useI18n } from '../i18n';
 import { isTauri } from '../utils/isTauri';
@@ -13,6 +13,11 @@ interface TitlebarProps {
 function Titlebar({ showSidebarToggle, sidebarOpen, onToggleSidebar, closeBehavior = 'tray' }: TitlebarProps) {
   const { t } = useI18n();
   const [appWindow, setAppWindow] = useState<Awaited<ReturnType<typeof import('@tauri-apps/api/window').getCurrentWindow>> | null>(null);
+  const isMac = useMemo(() => {
+    if (!isTauri()) return false;
+    const ua = navigator.userAgent.toLowerCase();
+    return ua.includes('mac os') || ua.includes('macos');
+  }, []);
 
   useEffect(() => {
     if (isTauri()) {
@@ -43,30 +48,67 @@ function Titlebar({ showSidebarToggle, sidebarOpen, onToggleSidebar, closeBehavi
 
   return (
     <div data-tauri-drag-region className="titlebar">
-      <div className="titlebar-left">
-        {showSidebarToggle && (
-          <button
-            type="button"
-            className={`titlebar-btn sidebar-toggle ${sidebarOpen ? 'active' : ''}`}
-            onClick={onToggleSidebar}
-            aria-label="Toggle sidebar"
-          >
-            <LuMenu size={16} />
-          </button>
+      <div className={isMac ? 'titlebar-left mac' : 'titlebar-left'}>
+        {isMac ? (
+          <>
+            <div className="mac-window-controls">
+              <button
+                type="button"
+                className="mac-window-btn mac-close"
+                onClick={handleClose}
+                aria-label={t.common.close}
+              />
+              <button
+                type="button"
+                className="mac-window-btn mac-minimize"
+                onClick={handleMinimize}
+                aria-label={t.common.minimize}
+              />
+              <button
+                type="button"
+                className="mac-window-btn mac-maximize"
+                onClick={handleMaximize}
+                aria-label={t.common.maximize}
+              />
+            </div>
+            {showSidebarToggle && (
+              <button
+                type="button"
+                className={`titlebar-btn sidebar-toggle ${sidebarOpen ? 'active' : ''}`}
+                onClick={onToggleSidebar}
+                aria-label="Toggle sidebar"
+              >
+                <LuMenu size={16} />
+              </button>
+            )}
+          </>
+        ) : (
+          showSidebarToggle && (
+            <button
+              type="button"
+              className={`titlebar-btn sidebar-toggle ${sidebarOpen ? 'active' : ''}`}
+              onClick={onToggleSidebar}
+              aria-label="Toggle sidebar"
+            >
+              <LuMenu size={16} />
+            </button>
+          )
         )}
       </div>
       <div className="titlebar-title">Rododendron</div>
-      <div className="titlebar-controls">
-        <button className="titlebar-btn" onClick={handleMinimize} aria-label={t.common.minimize}>
-          <LuMinus size={14} />
-        </button>
-        <button className="titlebar-btn" onClick={handleMaximize} aria-label={t.common.maximize}>
-          <LuSquare size={12} />
-        </button>
-        <button className="titlebar-btn close" onClick={handleClose} aria-label={t.common.close}>
-          <LuX size={16} />
-        </button>
-      </div>
+      {!isMac && (
+        <div className="titlebar-controls">
+          <button className="titlebar-btn" onClick={handleMinimize} aria-label={t.common.minimize}>
+            <LuMinus size={14} />
+          </button>
+          <button className="titlebar-btn" onClick={handleMaximize} aria-label={t.common.maximize}>
+            <LuSquare size={12} />
+          </button>
+          <button className="titlebar-btn close" onClick={handleClose} aria-label={t.common.close}>
+            <LuX size={16} />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

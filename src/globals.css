@@ -150,7 +150,6 @@ body {
   justify-content: space-between;
   -webkit-app-region: drag;
   user-select: none;
-  app-region: drag;
   z-index: 10001;
 }
 
@@ -159,6 +158,40 @@ body {
   align-items: center;
   gap: 0.25rem;
   -webkit-app-region: drag;
+}
+
+.titlebar-left.mac {
+  gap: 0.75rem;
+  padding-left: 0.5rem;
+}
+
+.mac-window-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  -webkit-app-region: no-drag;
+}
+
+.mac-window-btn {
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 9999px;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.mac-window-btn.mac-close {
+  background: #ff5f57;
+}
+
+.mac-window-btn.mac-minimize {
+  background: #ffbd2e;
+}
+
+.mac-window-btn.mac-maximize {
+  background: #28c840;
 }
 
 .titlebar-title {

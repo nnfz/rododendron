@@ -1,4 +1,4 @@
-import { memo, useState, useCallback, type Dispatch, type SetStateAction } from 'react';
+import { memo, useEffect, useState, useCallback, type Dispatch, type SetStateAction } from 'react';
 import { LuPlus, LuTrash2, LuSearch, LuMonitor, LuGlobe, LuHash, LuX, LuHelpCircle } from 'react-icons/lu';
 import { useI18n } from '../i18n';
 import type { Rule } from '../types';
@@ -17,6 +17,7 @@ type RuleType = 'process' | 'domain' | 'domain_keyword';
 
 function RulesPage({ rules, setRules, vpnEnabled, restartVPN }: RulesPageProps) {
   const { t } = useI18n();
+  const [osPlatform, setOsPlatform] = useState<'windows' | 'macos' | 'linux' | 'unknown'>('unknown');
   const [newRuleApp, setNewRuleApp] = useState('');
   const [newRuleType, setNewRuleType] = useState<RuleType>('process');
   const [newRuleAction, setNewRuleAction] = useState<'Via VPN' | 'Direct'>('Via VPN');
@@ -29,6 +30,15 @@ function RulesPage({ rules, setRules, vpnEnabled, restartVPN }: RulesPageProps) 
   >([]);
   const [isLoadingProcesses, setIsLoadingProcesses] = useState(false);
   const [processSearchQuery, setProcessSearchQuery] = useState('');
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    const ua = navigator.userAgent.toLowerCase();
+    if (ua.includes("windows")) setOsPlatform('windows');
+    else if (ua.includes("mac os") || ua.includes("macos")) setOsPlatform('macos');
+    else if (ua.includes("linux")) setOsPlatform('linux');
+    else setOsPlatform('unknown');
+  }, []);
 
   const exportRulesToConfig = useCallback(async () => {
     if (!isTauri()) return;
@@ -95,19 +105,32 @@ function RulesPage({ rules, setRules, vpnEnabled, restartVPN }: RulesPageProps) 
   }, [rules, setRules, vpnEnabled, restartVPN]);
 
   const isValidProcessTarget = useCallback((raw: string): boolean => {
-    const s = raw.trim().toLowerCase();
+    const s = raw.trim();
     if (!s) return false;
-    if (s.includes('://') || s.includes('/') || s.includes('\\')) return false;
-    if (s.includes(' ') || s.includes('@')) return false;
-    if (s.endsWith('.com')) return false;
+    const lower = s.toLowerCase();
 
-    const allowedExtensions = ['.exe', '.bat', '.cmd', '.scr'];
-    if (!allowedExtensions.some(ext => s.endsWith(ext))) return false;
+    // Disallow obvious URLs/paths; process rules should be just a process name.
+    if (lower.includes('://') || s.includes('/') || s.includes('\\')) return false;
 
+    // Some characters are invalid/unsafe to store as a process target.
     if (/[<>:"|?*]/.test(s)) return false;
 
+    // Avoid confusing process rule with domain.
+    if (lower.endsWith('.com')) return false;
+
+    if (osPlatform === 'windows') {
+      // Keep strict Windows expectations to prevent user mistakes.
+      if (s.includes('@')) return false;
+      if (s.includes(' ')) return false;
+      const allowedExtensions = ['.exe', '.bat', '.cmd', '.scr'];
+      if (!allowedExtensions.some(ext => lower.endsWith(ext))) return false;
+      return true;
+    }
+
+    // macOS/Linux: allow spaces, and do not require .exe.
+    if (s.includes('@')) return false;
     return true;
-  }, []);
+  }, [osPlatform]);
 
   const triggerNewRuleInputError = useCallback(() => {
     setNewRuleInputError(true);
@@ -206,7 +229,7 @@ function RulesPage({ rules, setRules, vpnEnabled, restartVPN }: RulesPageProps) 
   };
   const getRuleTypeLabelPlaceholder = (type: string) => {
     switch (type) {
-      case 'process': return 'chrome.exe';
+      case 'process': return osPlatform === 'windows' ? 'chrome.exe' : 'Google Chrome';
       case 'domain': return 'youtube.com';
       case 'domain_keyword': return 'youtube';
       default: return type;

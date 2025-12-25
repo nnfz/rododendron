@@ -58,10 +58,39 @@ fn is_newer_version(current: &str, latest: &str) -> Option<bool> {
     Some(l > c)
 }
 
-fn select_windows_exe_asset(assets: &[GitHubAsset]) -> Option<&GitHubAsset> {
+#[cfg(target_os = "windows")]
+fn select_platform_asset(assets: &[GitHubAsset]) -> Option<&GitHubAsset> {
     assets
         .iter()
         .find(|a| a.name.to_ascii_lowercase().ends_with(".exe"))
+}
+
+#[cfg(target_os = "macos")]
+fn select_platform_asset(assets: &[GitHubAsset]) -> Option<&GitHubAsset> {
+    let prefer = [".dmg", ".zip"];
+    for ext in prefer {
+        if let Some(a) = assets
+            .iter()
+            .find(|x| x.name.to_ascii_lowercase().ends_with(ext))
+        {
+            return Some(a);
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "linux")]
+fn select_platform_asset(assets: &[GitHubAsset]) -> Option<&GitHubAsset> {
+    let prefer = [".appimage", ".deb", ".tar.gz", ".zip"];
+    for ext in prefer {
+        if let Some(a) = assets
+            .iter()
+            .find(|x| x.name.to_ascii_lowercase().ends_with(ext))
+        {
+            return Some(a);
+        }
+    }
+    None
 }
 
 async fn fetch_latest_release() -> Result<GitHubRelease, String> {
@@ -90,7 +119,7 @@ pub async fn check_for_updates() -> Result<UpdateCheckResult, String> {
     let update_available = is_newer_version(&current_version, &latest_version).unwrap_or(false);
 
     let (asset_name, download_url) = if update_available {
-        if let Some(asset) = select_windows_exe_asset(&release.assets) {
+        if let Some(asset) = select_platform_asset(&release.assets) {
             (Some(asset.name.clone()), Some(asset.browser_download_url.clone()))
         } else {
             (None, None)
@@ -120,8 +149,8 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
         return Err("No update available".to_string());
     }
 
-    let asset = select_windows_exe_asset(&release.assets)
-        .ok_or_else(|| "No .exe asset found in the latest release".to_string())?;
+    let asset = select_platform_asset(&release.assets)
+        .ok_or_else(|| "No compatible asset found in the latest release".to_string())?;
 
     let client = reqwest::Client::new();
     let bytes = client
@@ -167,7 +196,22 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
 }
 
 fn spawn_installer(path: &PathBuf) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
     let mut cmd = std::process::Command::new(path);
+
+    #[cfg(target_os = "macos")]
+    let mut cmd = {
+        let mut c = std::process::Command::new("open");
+        c.arg(path);
+        c
+    };
+
+    #[cfg(target_os = "linux")]
+    let mut cmd = {
+        let mut c = std::process::Command::new("xdg-open");
+        c.arg(path);
+        c
+    };
 
     #[cfg(target_os = "windows")]
     {
