@@ -269,6 +269,8 @@ body {
   border: none;
   padding: 0;
   cursor: help;
+  margin-left: 0.25rem;
+  vertical-align: middle;
 }
 
 .help-icon {

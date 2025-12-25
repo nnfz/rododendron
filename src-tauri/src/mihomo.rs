@@ -470,27 +470,32 @@ pub fn generate_config(
 
     yaml["log-level"] = serde_yaml::Value::String(log_level.to_lowercase());
 
-    let mut rules = Vec::new();
-    let has_active_rules = user_rules.iter().any(|r| r.active);
-    for rule in user_rules.iter().filter(|r| r.active) {
-        let target = if rule.rule == "Via VPN" { "PROXY" } else { "DIRECT" };
-        let rule_str = match rule.rule_type.as_str() {
-            "process" => format!("PROCESS-NAME,{},{}", rule.app, target),
-            "domain" => format!("DOMAIN,{},{}", rule.app, target),
-            "domain_keyword" => format!("DOMAIN-KEYWORD,{},{}", rule.app, target),
-            "ip" => format!("IP-CIDR,{}/32,{}", rule.app, target),
-            _ => format!("PROCESS-NAME,{},{}", rule.app, target),
-        };
-        rules.push(serde_yaml::Value::String(rule_str));
-    }
+    // IMPORTANT:
+    // If frontend sends no rules (e.g. during startup before rules are loaded),
+    // do not wipe existing config rules. Only override rules when user_rules is non-empty.
+    if !user_rules.is_empty() {
+        let mut rules = Vec::new();
+        let has_active_rules = user_rules.iter().any(|r| r.active);
+        for rule in user_rules.iter().filter(|r| r.active) {
+            let target = if rule.rule == "Via VPN" { "PROXY" } else { "DIRECT" };
+            let rule_str = match rule.rule_type.as_str() {
+                "process" => format!("PROCESS-NAME,{},{}", rule.app, target),
+                "domain" => format!("DOMAIN,{},{}", rule.app, target),
+                "domain_keyword" => format!("DOMAIN-KEYWORD,{},{}", rule.app, target),
+                "ip" => format!("IP-CIDR,{}/32,{}", rule.app, target),
+                _ => format!("PROCESS-NAME,{},{}", rule.app, target),
+            };
+            rules.push(serde_yaml::Value::String(rule_str));
+        }
 
-    if has_active_rules {
-        rules.push(serde_yaml::Value::String("MATCH,DIRECT".to_string()));
-    } else {
-        rules.push(serde_yaml::Value::String("MATCH,PROXY".to_string()));
-    }
+        if has_active_rules {
+            rules.push(serde_yaml::Value::String("MATCH,DIRECT".to_string()));
+        } else {
+            rules.push(serde_yaml::Value::String("MATCH,PROXY".to_string()));
+        }
 
-    yaml["rules"] = serde_yaml::Value::Sequence(rules);
+        yaml["rules"] = serde_yaml::Value::Sequence(rules);
+    }
 
     // Keep existing tun config if present, only toggle enable + optional MTU.
     if !yaml.get("tun").is_some() {
@@ -517,6 +522,10 @@ pub async fn import_config(app: AppHandle, config_content: String, filename: Str
 
 #[tauri::command(rename_all = "camelCase")]
 pub async fn save_rules_to_config(app: AppHandle, filename: String, user_rules: Vec<UserRule>) -> Result<(), String> {
+    if user_rules.is_empty() {
+        return Ok(());
+    }
+
     let config_path = find_existing_config_path(&app, &filename)
         .unwrap_or_else(|| primary_config_dir(&app).join(&filename));
 
@@ -556,6 +565,10 @@ pub async fn save_rules_to_config(app: AppHandle, filename: String, user_rules: 
 
 #[tauri::command(rename_all = "camelCase")]
 pub async fn save_rules_to_path(path: String, user_rules: Vec<UserRule>) -> Result<(), String> {
+    if user_rules.is_empty() {
+        return Ok(());
+    }
+
     let config_path = PathBuf::from(path);
 
     let content = fs::read_to_string(&config_path)

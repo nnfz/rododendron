@@ -115,7 +115,7 @@ export default function RulesPage({ rules, setRules, vpnEnabled, restartVPN }: R
     setTimeout(() => setNewRuleInputShake(false), 400);
   }, []);
 
-  const deleteRule = useCallback(async(id: number) => {
+  const deleteRule = useCallback(async (id: number) => {
     const nextRules = rules.filter(r => r.id !== id);
     setRules(nextRules);
     if (vpnEnabled) {
@@ -231,7 +231,7 @@ export default function RulesPage({ rules, setRules, vpnEnabled, restartVPN }: R
       default: return appName;
     }
   };
-  
+
   return (
     <div className="page-content">
       <div className="page-header">
@@ -242,11 +242,8 @@ export default function RulesPage({ rules, setRules, vpnEnabled, restartVPN }: R
         {isTauri() && (
           <div className="panel">
             <div className="panel-row disabled" style={{ justifyContent: 'space-between' }}>
-              <span className="setting-label">{t.rules.title}</span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <button onClick={exportRulesToConfig} className="btn btn-primary-dark">
-                  {t.rules.exportToConfig}
-                </button>
+              <span className="setting-label">
+                {t.rules.title}
                 <button
                   type="button"
                   className="help-tooltip"
@@ -255,6 +252,11 @@ export default function RulesPage({ rules, setRules, vpnEnabled, restartVPN }: R
                 >
                   <LuHelpCircle size={14} className="help-icon" />
                   <span className="help-tooltip-content">{t.rules.exportToConfigHelp}</span>
+                </button>
+              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <button onClick={exportRulesToConfig} className="btn btn-primary-dark">
+                  {t.rules.exportToConfig}
                 </button>
               </div>
             </div>

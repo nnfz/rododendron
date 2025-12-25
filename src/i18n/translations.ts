@@ -295,7 +295,7 @@ export const translations: Record<Language, Translations> = {
       startminimized: 'Запускать свёрнутым',
       confirmDelete: 'Вы уверены?',
       autoConnect: 'Автоподключение',
-      killSwitch: 'Килл-свитч',
+      killSwitch: 'Kill Switch',
       killSwitchHelp: 'Блокирует интернет при разрыве VPN, чтобы не было утечек трафика.',
       advanced: 'Продвинутые',
       logLevel: 'Уровень логов',
