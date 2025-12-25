@@ -25,7 +25,7 @@ fn run_reg(args: &[String]) -> Result<(), String> {
 pub fn set_autostart(_app: AppHandle, enabled: bool) -> Result<(), String> {
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = app;
+        let _ = _app;
         let _ = enabled;
         return Err("autostart is only implemented for Windows in this build".to_string());
     }

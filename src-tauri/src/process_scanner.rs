@@ -1,3 +1,4 @@
+#[cfg(target_os = "windows")]
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::Serialize;
 use std::collections::HashMap;

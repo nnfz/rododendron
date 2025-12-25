@@ -140,7 +140,7 @@ fn kill_existing_mihomo() {
     use std::os::windows::process::CommandExt;
 
     let _ = Command::new("taskkill")
-        .args(["/F", "/IM", "mihomo.exe"])
+        .args(["/F", "/IM", get_binary_name()])
         .creation_flags(0x08000000)
         .output();
 }
@@ -150,7 +150,7 @@ fn kill_existing_mihomo() {
     use std::process::Command;
     let _ = Command::new("pkill")
         .arg("-9")
-        .arg("mihomo")
+        .arg(get_binary_name())
         .output();
 }
 
@@ -159,7 +159,7 @@ fn kill_existing_mihomo() {
     use std::process::Command;
     let _ = Command::new("pkill")
         .arg("-9")
-        .arg("mihomo")
+        .arg(get_binary_name())
         .output();
 }
 
@@ -430,9 +430,18 @@ fn get_mihomo_path(app: &AppHandle) -> PathBuf {
 }
 
 #[cfg(target_os = "windows")]
-fn get_binary_name() -> &'static str { "mihomo.exe" }
-#[cfg(not(target_os = "windows"))]
-fn get_binary_name() -> &'static str { "mihomo" }
+fn get_binary_name() -> &'static str { "mihomo-windows.exe" }
+
+#[cfg(target_os = "macos")]
+fn get_binary_name() -> &'static str { "mihomo-macos" }
+
+#[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+fn get_binary_name() -> &'static str { "mihomo-linux" }
+
+#[tauri::command]
+pub fn get_mihomo_binary_name() -> String {
+    get_binary_name().to_string()
+}
 
 fn primary_config_dir(app: &AppHandle) -> PathBuf {
     app.path()

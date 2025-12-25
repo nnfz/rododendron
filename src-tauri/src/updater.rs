@@ -147,7 +147,7 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         let _ = std::process::Command::new("taskkill")
-            .args(["/F", "/IM", "mihomo.exe"])
+            .args(["/F", "/IM", mihomo::get_mihomo_binary_name().as_str()])
             .creation_flags(0x08000000)
             .output();
     }
@@ -156,7 +156,7 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
     {
         let _ = std::process::Command::new("pkill")
             .arg("-9")
-            .arg("mihomo")
+            .arg(mihomo::get_mihomo_binary_name())
             .output();
     }
 

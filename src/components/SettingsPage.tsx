@@ -1,4 +1,4 @@
-import React, { useRef, useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { LuChevronRight, LuDownload, LuFileText, LuHelpCircle, LuRefreshCw, LuUpload, LuTrash2 } from 'react-icons/lu';
 import CustomSelect from './CustomSelect';
 import { useI18n } from '../i18n';
@@ -50,6 +50,30 @@ function SettingsPage({
   const [updateStatusText, setUpdateStatusText] = useState<string | null>(null);
   const [isCheckingUpdates, setIsCheckingUpdates] = useState(false);
   const [isInstallingUpdate, setIsInstallingUpdate] = useState(false);
+
+  const [mihomoCoreName, setMihomoCoreName] = useState<string>('mihomo');
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      if (!isTauri()) return;
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const name = await invoke<string>('get_mihomo_binary_name');
+        if (cancelled) return;
+        if (typeof name === 'string' && name.trim()) {
+          setMihomoCoreName(name.trim());
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const toggleSetting = useCallback(async (key: keyof Settings) => {
     try {
@@ -428,7 +452,7 @@ function SettingsPage({
             </div>
             <div className="panel-row disabled">
               <span className="setting-label">{t.settings.versioncore}</span>
-              <span className="setting-value">mihomo</span>
+              <span className="setting-value">{mihomoCoreName}</span>
             </div>
 
             <div className="config-actions">

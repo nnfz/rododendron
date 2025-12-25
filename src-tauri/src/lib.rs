@@ -9,6 +9,7 @@ use mihomo::{
     start_vpn, stop_vpn, get_vpn_status,
     list_configs, read_config, delete_config,
     save_rules_to_config, save_rules_to_path, export_config_to_path, resolve_config_path, get_mihomo_logs, clear_mihomo_logs,
+    get_mihomo_binary_name,
     mihomo_get_traffic, mihomo_get_proxies, mihomo_get_connections, mihomo_get_delay, ping_host,
 };
 
@@ -48,7 +49,11 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .setup(|app| {
+            #[cfg(target_os = "windows")]
             let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/icon.ico"))?;
+
+            #[cfg(not(target_os = "windows"))]
+            let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png"))?;
             let show = MenuItemBuilder::with_id("tray_show", "Show").build(app)?;
             let quit = MenuItemBuilder::with_id("tray_quit", "Quit").build(app)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;
@@ -130,6 +135,7 @@ pub fn run() {
             delete_config,
             get_mihomo_logs,
             clear_mihomo_logs,
+            get_mihomo_binary_name,
             save_rules_to_config,
             save_rules_to_path,
             export_config_to_path,
