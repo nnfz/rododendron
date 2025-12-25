@@ -21,7 +21,6 @@ fn extract_icon(path: &str) -> Option<String> {
     use windows_sys::Win32::UI::WindowsAndMessaging::{DestroyIcon, GetIconInfo, ICONINFO};
 
     unsafe {
-        // Convert path to wide string
         let wide_path: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
 
         let mut large_icon: isize = 0;
@@ -31,7 +30,6 @@ fn extract_icon(path: &str) -> Option<String> {
             return None;
         }
 
-        // Get icon info
         let mut icon_info: ICONINFO = std::mem::zeroed();
         if GetIconInfo(large_icon, &mut icon_info) == 0 {
             DestroyIcon(large_icon);
@@ -47,7 +45,6 @@ fn extract_icon(path: &str) -> Option<String> {
             return None;
         }
 
-        // Create DC
         let hdc = CreateCompatibleDC(0);
         if hdc == 0 {
             DeleteObject(hbm_color);
@@ -60,18 +57,16 @@ fn extract_icon(path: &str) -> Option<String> {
 
         let old_bmp = SelectObject(hdc, hbm_color);
 
-        // Setup bitmap info for 32x32 RGBA
         let width: i32 = 32;
         let height: i32 = 32;
         let mut bmi: BITMAPINFO = std::mem::zeroed();
         bmi.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
         bmi.bmiHeader.biWidth = width;
-        bmi.bmiHeader.biHeight = -height; // Top-down
+        bmi.bmiHeader.biHeight = -height;
         bmi.bmiHeader.biPlanes = 1;
         bmi.bmiHeader.biBitCount = 32;
         bmi.bmiHeader.biCompression = BI_RGB;
 
-        // Get pixels
         let mut pixels: Vec<u8> = vec![0u8; (width * height * 4) as usize];
         let result = GetDIBits(
             hdc,
@@ -95,12 +90,10 @@ fn extract_icon(path: &str) -> Option<String> {
             return None;
         }
 
-        // Convert BGRA to RGBA
         for chunk in pixels.chunks_exact_mut(4) {
             chunk.swap(0, 2);
         }
 
-        // Encode as PNG
         let png_data = encode_png(&pixels, width as u32, height as u32)?;
         Some(STANDARD.encode(&png_data))
     }
@@ -110,35 +103,30 @@ fn extract_icon(path: &str) -> Option<String> {
 fn encode_png(rgba: &[u8], width: u32, height: u32) -> Option<Vec<u8>> {
     let mut png_data = Vec::new();
 
-    // PNG signature
     png_data.extend_from_slice(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
 
-    // IHDR chunk
     let mut ihdr = Vec::new();
     ihdr.extend_from_slice(&width.to_be_bytes());
     ihdr.extend_from_slice(&height.to_be_bytes());
-    ihdr.push(8); // bit depth
-    ihdr.push(6); // color type (RGBA)
-    ihdr.push(0); // compression
-    ihdr.push(0); // filter
-    ihdr.push(0); // interlace
+    ihdr.push(8);
+    ihdr.push(6);
+    ihdr.push(0);
+    ihdr.push(0);
+    ihdr.push(0);
     write_chunk(&mut png_data, b"IHDR", &ihdr);
 
-    // IDAT chunk - raw uncompressed
     let mut raw_data = Vec::new();
     for y in 0..height {
-        raw_data.push(0); // filter byte (none)
+        raw_data.push(0);
         let row_start = (y * width * 4) as usize;
         let row_end = row_start + (width * 4) as usize;
         raw_data.extend_from_slice(&rgba[row_start..row_end]);
     }
 
-    // Simple zlib wrapper (uncompressed)
     let mut zlib_data = Vec::new();
-    zlib_data.push(0x78); // CMF
-    zlib_data.push(0x01); // FLG
+    zlib_data.push(0x78);
+    zlib_data.push(0x01);
 
-    // Split into blocks
     let mut remaining = &raw_data[..];
     while !remaining.is_empty() {
         let block_size = remaining.len().min(65535);
@@ -150,13 +138,10 @@ fn encode_png(rgba: &[u8], width: u32, height: u32) -> Option<Vec<u8>> {
         remaining = &remaining[block_size..];
     }
 
-    // Adler32 checksum
     let adler = adler32(&raw_data);
     zlib_data.extend_from_slice(&adler.to_be_bytes());
 
     write_chunk(&mut png_data, b"IDAT", &zlib_data);
-
-    // IEND chunk
     write_chunk(&mut png_data, b"IEND", &[]);
 
     Some(png_data)
@@ -200,6 +185,38 @@ fn adler32(data: &[u8]) -> u32 {
         b = (b + a) % 65521;
     }
     (b << 16) | a
+}
+
+#[cfg(target_os = "windows")]
+fn is_system_process(name: &str, path: &Option<String>) -> bool {
+    let system_names = [
+        "System", "Registry", "smss.exe", "csrss.exe", "wininit.exe", 
+        "services.exe", "lsass.exe", "svchost.exe", "winlogon.exe",
+        "dwm.exe", "fontdrvhost.exe", "WUDFHost.exe", "sihost.exe",
+        "taskhostw.exe", "RuntimeBroker.exe", "dllhost.exe", 
+        "conhost.exe", "spoolsv.exe", "SearchIndexer.exe",
+        "SearchHost.exe", "StartMenuExperienceHost.exe",
+        "ShellExperienceHost.exe", "TextInputHost.exe",
+        "SecurityHealthService.exe", "MsMpEng.exe", "NisSrv.exe",
+        "SgrmBroker.exe", "audiodg.exe", "SearchProtocolHost.exe",
+        "SearchFilterHost.exe", "WmiPrvSE.exe", "TrustedInstaller.exe",
+        "TiWorker.exe", "wuauclt.exe", "UsoClient.exe"
+    ];
+
+    if system_names.iter().any(|&sys_name| name.eq_ignore_ascii_case(sys_name)) {
+        return true;
+    }
+
+    if let Some(p) = path {
+        let p_lower = p.to_lowercase();
+        if p_lower.contains("\\windows\\system32\\") 
+            || p_lower.contains("\\windows\\syswow64\\")
+            || p_lower.contains("\\windows\\winsxs\\") {
+            return true;
+        }
+    }
+
+    false
 }
 
 #[tauri::command]
@@ -267,6 +284,12 @@ pub fn get_running_processes() -> Vec<ProcessInfo> {
                         } else {
                             None
                         };
+
+                        // Фильтруем системные процессы
+                        if is_system_process(&name, &path) {
+                            CloseHandle(handle);
+                            continue;
+                        }
 
                         let icon = path.as_ref().and_then(|p| extract_icon(p));
 

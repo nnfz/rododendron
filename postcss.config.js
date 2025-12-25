@@ -1,4 +1,4 @@
 export default {
-  // No PostCSS plugins configured — PostCSS/autoprefixer were removed
+  // нахуя тут это
   plugins: {},
 }

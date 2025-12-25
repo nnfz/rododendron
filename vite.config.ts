@@ -4,7 +4,9 @@ import react from '@vitejs/plugin-react'
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   plugins: [react()],
-  // Tauri expects a fixed port
+  define: {
+    __APP_VERSION__: JSON.stringify(process.env.npm_package_version),
+  },
   clearScreen: false,
   server: {
     port: 1420,

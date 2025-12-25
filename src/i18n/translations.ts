@@ -24,6 +24,7 @@ export type Translations = {
   rules: {
     title: string;
     addRule: string;
+    exportToConfig: string;
     process: string;
     domain: string;
     domainkey: string;
@@ -31,16 +32,26 @@ export type Translations = {
     processName: string;
     routeVia: string;
     cancel: string;
+    noRules: string;
     active: string;
     inactive: string;
     scan: string;
     runningProcesses: string;
     searchProcesses: string;
+    loadingProcesses: string;
+    type: string;
+    target: string;
+    action: string;
+    status: string;
+    actions: string;
     viaVpn: string;
     direct: string;
+    noProcessesFound: string;
+    searchRules: string;
     placeholder: {
       process: string;
       domain: string;
+      domainkey: string;
       ip: string;
     };
   };
@@ -53,17 +64,22 @@ export type Translations = {
     logsAndDiagnostics: string;
     importConfig: string;
     deleteConfig: string;
+    snowfall: string;
     logs: string;
     mainSettings: string;
     autoConnect: string;
     autoLaunch: string;
+    enableTun: string;
     startminimized: string;
     killSwitch: string;
+    killSwitchHelp: string;
     advanced: string;
     logLevel: string;
     mtu: string;
+    mtuHelp: string;
     about: string;
     version: string;
+    confirmDelete: string;
     versioncore: string;
   };
   logs: {
@@ -110,24 +126,35 @@ export const translations: Record<Language, Translations> = {
     rules: {
       title: 'Routing Rules',
       addRule: 'Add Rule',
+      exportToConfig: 'Save rules to config',
       process: 'Process',
       domain: 'Domain',
       domainkey: 'Keyword',
+      type: 'Type',
+      target: 'Target',
+      action: 'Action',
+      status: 'Status',
+      actions: 'Actions',
+      searchRules: 'Search rules...',
+      loadingProcesses: 'Loading processes...',
       ipAddress: 'IP Address',
       processName: 'Process name',
       routeVia: 'Route via',
       cancel: 'Cancel',
       active: 'Active',
       inactive: 'Inactive',
+      noRules: 'No rules defined. Add a new rule.',
       scan: 'Scan',
       runningProcesses: 'Running Processes',
       searchProcesses: 'Search processes...',
       viaVpn: 'Via VPN',
       direct: 'Direct',
+      noProcessesFound: 'No processes found',
       placeholder: {
-        process: 'e.g., chrome.exe',
-        domain: 'e.g., google.com',
-        ip: 'e.g., 8.8.8.8',
+        process: 'chrome.exe',
+        domain: 'google.com',
+        domainkey: 'youtube',
+        ip: '8.8.8.8',
       }
     },
     settings: {
@@ -143,11 +170,16 @@ export const translations: Record<Language, Translations> = {
       mainSettings: 'Main Settings',
       autoConnect: 'Auto connect',
       startminimized: 'Start minimized',
+      snowfall: 'Snowfall',
       autoLaunch: 'Auto launch',
+      confirmDelete: 'Are you sure?',
       killSwitch: 'Kill Switch',
+      killSwitchHelp: 'Blocks internet access when VPN is disconnected to prevent traffic leaks.',
       advanced: 'Advanced',
       logLevel: 'Log level',
+      enableTun: 'Enable TUN',
       mtu: 'MTU',
+      mtuHelp: 'Maximum packet size. Lower it if you have connection issues; 1500 is default.',
       about: 'About',
       version: 'Version',
       versioncore: 'Core version',
@@ -194,24 +226,36 @@ export const translations: Record<Language, Translations> = {
     rules: {
       title: 'Правила маршрутизации',
       addRule: 'Добавить правило',
+      exportToConfig: 'Сохранить правила в конфиг',
       process: 'Процесс',
       domain: 'Домен',
-      domainkey: 'Ключевое слово',
+      type: 'Тип',
+      target: 'Цель',
+      action: 'Действие',
+      status: 'Статус',
+      actions: 'Действия',
+      searchRules: 'Поиск правил...',
+      loadingProcesses: 'Загрузка процессов...',
+      domainkey: 'Кейворд',
       ipAddress: 'IP адрес',
       processName: 'Имя процесса',
       routeVia: 'Маршрут через',
       cancel: 'Отмена',
+      noRules: 'Правила не заданы. Добавьте новое правило.',
       active: 'Активно',
       inactive: 'Неактивно',
       scan: 'Сканировать',
       runningProcesses: 'Запущенные процессы',
+      
       searchProcesses: 'Поиск процессов...',
       viaVpn: 'Через VPN',
       direct: 'Напрямую',
+      noProcessesFound: 'Процессы не найдены',
       placeholder: {
-        process: 'например, chrome.exe',
-        domain: 'например, google.com',
-        ip: 'например, 8.8.8.8',
+        process: 'chrome.exe',
+        domain: 'google.com',
+        domainkey: 'youtube',
+        ip: '8.8.8.8',
       },
     },
     settings: {
@@ -223,15 +267,20 @@ export const translations: Record<Language, Translations> = {
       deleteConfig: 'Удалить конфигурацию',
       interfaceLanguage: 'Язык интерфейса',
       logsAndDiagnostics: 'Логи и диагностика',
+      enableTun: 'Включить TUN',
+      snowfall: 'Снежинки',
       logs: 'Логи',
       mainSettings: 'Основные настройки',
       autoLaunch: 'Автозапуск',
       startminimized: 'Запускать свёрнутым',
+      confirmDelete: 'Вы уверены?',
       autoConnect: 'Автоподключение',
-      killSwitch: 'Kill Switch',
-      advanced: 'Расширенные',
+      killSwitch: 'Килл-свитч',
+      killSwitchHelp: 'Блокирует интернет при разрыве VPN, чтобы не было утечек трафика.',
+      advanced: 'Продвинутые',
       logLevel: 'Уровень логов',
       mtu: 'MTU',
+      mtuHelp: 'Макс. размер пакета. Уменьши, если есть проблемы с подключением; 1500 по умолчанию.',
       about: 'О программе',
       version: 'Версия',
       versioncore: 'Версия ядра',
@@ -278,24 +327,35 @@ export const translations: Record<Language, Translations> = {
     rules: {
       title: 'Правілы маршрутызацыі',
       addRule: 'Дадаць правіла',
+      exportToConfig: 'Захаваць правілы ў канфіг',
       process: 'Працэс',
+      type: 'Тып',
+      target: 'Мэта',
+      action: 'Дзеянне',
+      status: 'Статус',
+      actions: 'Дзеянні',
+      searchRules: 'Пошук правілаў...',
+      loadingProcesses: 'Загрузка процессов...',
+      noProcessesFound: 'Няма даступных працэсаў',
       domain: 'Дамен',
-      domainkey: 'Ключавое слова',
+      domainkey: 'Кейворд',
       ipAddress: 'IP адрас',
       processName: 'Імя працэсу',
       routeVia: 'Маршрут праз',
       cancel: 'Адмена',
       active: 'Актыўна',
       inactive: 'Неактыўна',
+      noRules: 'Правілы не зададзеныя. Дадайце новае правіла.',
       scan: 'Сканаваць',
       runningProcesses: 'Запушчаныя працэсы',
       searchProcesses: 'Пошук працэсаў...',
       viaVpn: 'Праз VPN',
       direct: 'Напрамую',
       placeholder: {
-        process: 'напрыклад, chrome.exe',
-        domain: 'напрыклад, google.com',
-        ip: 'напрыклад, 8.8.8.8',
+        process: 'chrome.exe',
+        domain: 'kufar.by',
+        domainkey: 'kufar',
+        ip: '8.8.8.8',
       },
     },
     settings: {
@@ -307,15 +367,20 @@ export const translations: Record<Language, Translations> = {
       logsAndDiagnostics: 'Логі і дыягностыка',
       importConfig: 'Імпарт канфігурацыі',
       deleteConfig: 'Выдаліць канфігурацыю',
+      enableTun: 'Уключыць TUN',
       logs: 'Логі',
+      confirmDelete: 'Вы ўпэўнены?',
+      snowfall: 'Сняжынкі',
       mainSettings: 'Асноўныя налады',
       autoLaunch: 'Аўтазапуск',
       autoConnect: 'Аўтападключэнне',
       startminimized: 'Запускаць згорнутым',
       killSwitch: 'Kill Switch',
+      killSwitchHelp: 'Блакуе інтэрнэт пры разрыве VPN, каб не было ўцечак трафіку.',
       advanced: 'Пашыраныя',
       logLevel: 'Узровень логаў',
       mtu: 'MTU',
+      mtuHelp: 'Макс. памер пакета. Паменшы, калі ёсць праблемы з падключэннем; 1500 па змаўчанні.',
       about: 'Пра праграму',
       version: 'Версія',
       versioncore: 'Версія ядра',

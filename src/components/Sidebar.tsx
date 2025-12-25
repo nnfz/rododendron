@@ -1,4 +1,4 @@
-import { LuPower, LuShield, LuSettings } from 'react-icons/lu';
+import { LuPower, LuShield, LuSettings, LuRefreshCcw } from 'react-icons/lu';
 import { useI18n } from '../i18n';
 import type { TabType } from '../types';
 
@@ -6,13 +6,22 @@ interface SidebarProps {
   activeTab: TabType;
   setActiveTab: (tab: TabType) => void;
   vpnEnabled: boolean;
+  restartVPN: () => void;
+  hasConfig: boolean;
+  className?: string;
 }
 
-export default function Sidebar({ activeTab, setActiveTab, vpnEnabled }: SidebarProps) {
+export default function Sidebar({ activeTab, setActiveTab, vpnEnabled, restartVPN, hasConfig, className }: SidebarProps) {
   const { t } = useI18n();
 
+  const handleRestart = () => {
+    if (vpnEnabled && hasConfig) {
+      restartVPN();
+    }
+  };
+
   return (
-    <div className="sidebar">
+    <div className={`sidebar ${className || ''}`.trim()}>
       <div className="sidebar-header">
         <h1 className="sidebar-title">{t.sidebar.title}</h1>
         <p className="sidebar-subtitle">{t.sidebar.subtitle}</p>
@@ -48,6 +57,14 @@ export default function Sidebar({ activeTab, setActiveTab, vpnEnabled }: Sidebar
       </nav>
 
       <div className="sidebar-footer">
+        <button 
+          className="btn btn-ghost-dark btn-restart" 
+          onClick={handleRestart} 
+          disabled={!vpnEnabled || !hasConfig}
+        >
+          <LuRefreshCcw size={16} />
+          {t.home.restartvpn}
+        </button>
         <div className="status-row">
           <span>{t.sidebar.status}:</span>
           <span className={`status ${vpnEnabled ? '' : 'disconnected'}`}>

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, useCallback, type Dispatch, type SetStateAction } from 'react';
 import type { Config, ParsedConfig } from '../types';
-
-const isTauri = typeof window !== 'undefined' && '__TAURI__' in window;
+import { isTauri } from '../utils/isTauri';
 const ACTIVE_KEY = 'vpn-active-config';
 
 export type { Config };
@@ -19,7 +18,7 @@ export function useConfigStorage(
   // Load configs on mount
   useEffect(() => {
     const loadConfigs = async () => {
-      if (isTauri) {
+      if (isTauri()) {
         try {
           const { invoke } = await import('@tauri-apps/api/core');
           const filenames = await invoke<string[]>('list_configs');
@@ -59,7 +58,7 @@ export function useConfigStorage(
         return;
       }
 
-      if (isTauri) {
+      if (isTauri()) {
         try {
           const { invoke } = await import('@tauri-apps/api/core');
           const content = await invoke<string>('read_config', { filename: config.filename });
@@ -80,7 +79,7 @@ export function useConfigStorage(
 
   // Import new config
   const importConfig = useCallback(async (content: string, filename: string): Promise<Config | null> => {
-    if (!isTauri) return null;
+    if (!isTauri()) return null;
     
     try {
       const { invoke } = await import('@tauri-apps/api/core');
@@ -104,7 +103,7 @@ export function useConfigStorage(
 
   // Delete config
   const deleteActiveConfig = useCallback(async () => {
-    if (!activeConfig || !isTauri) return;
+    if (!activeConfig || !isTauri()) return;
     
     const config = configs.find(c => c.id === activeConfig);
     if (!config) return;

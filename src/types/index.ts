@@ -6,7 +6,7 @@ export interface Rule {
   ruleType: 'process' | 'domain' | 'domain_keyword' | 'ip';
 }
 
-export type LogLevel = 'INFO' | 'WARN' | 'ERROR' | 'DEBUG';
+export type LogLevel = 'INFO' | 'WARNING' | 'ERROR' | 'DEBUG';
 
 export interface Log {
   id: number;
@@ -22,6 +22,8 @@ export interface Settings {
   killSwitch: boolean;
   logLevel: string;
   mtu: string;
+  enableTun: boolean;
+  snowfall: boolean;
 }
 
 export type TabType = 'home' | 'rules' | 'settings';

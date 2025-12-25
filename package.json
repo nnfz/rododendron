@@ -17,10 +17,12 @@
     "@tauri-apps/plugin-shell": "^2.3.3",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "react-icons": "^4.10.1"
+    "react-icons": "^4.10.1",
+    "react-snowfall": "^2.4.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
+    "@types/node": "^25.0.3",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",

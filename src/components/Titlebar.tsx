@@ -1,13 +1,20 @@
 import { useCallback, useEffect, useState } from 'react';
-import { LuMinus, LuSquare, LuX } from 'react-icons/lu';
+import { LuMenu, LuMinus, LuSquare, LuX } from 'react-icons/lu';
 import { useI18n } from '../i18n';
+import { isTauri } from '../utils/isTauri';
 
-export default function Titlebar() {
+interface TitlebarProps {
+  showSidebarToggle?: boolean;
+  sidebarOpen?: boolean;
+  onToggleSidebar?: () => void;
+}
+
+export default function Titlebar({ showSidebarToggle, sidebarOpen, onToggleSidebar }: TitlebarProps) {
   const { t } = useI18n();
   const [appWindow, setAppWindow] = useState<Awaited<ReturnType<typeof import('@tauri-apps/api/window').getCurrentWindow>> | null>(null);
 
   useEffect(() => {
-    if (typeof window !== 'undefined' && '__TAURI__' in window) {
+    if (isTauri()) {
       import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
         setAppWindow(getCurrentWindow());
       });
@@ -25,11 +32,23 @@ export default function Titlebar() {
   }, [appWindow]);
 
   const handleClose = useCallback(async () => {
-    await appWindow?.close();
+    await appWindow?.hide();
   }, [appWindow]);
 
   return (
     <div data-tauri-drag-region className="titlebar">
+      <div className="titlebar-left" data-tauri-drag-region>
+        {showSidebarToggle && (
+          <button
+            type="button"
+            className={`titlebar-btn sidebar-toggle ${sidebarOpen ? 'active' : ''}`}
+            onClick={onToggleSidebar}
+            aria-label="Toggle sidebar"
+          >
+            <LuMenu size={16} />
+          </button>
+        )}
+      </div>
       <div className="titlebar-title" data-tauri-drag-region>Rododendron</div>
       <div className="titlebar-controls">
         <button className="titlebar-btn" onClick={handleMinimize} aria-label={t.common.minimize}>

@@ -1,14 +1,14 @@
-import React, { useRef, useCallback, useEffect } from 'react';
-import { LuChevronRight, LuFileText, LuUpload, LuTrash2 } from 'react-icons/lu';
+import React, { useRef, useCallback, useState } from 'react';
+import { LuChevronRight, LuFileText, LuHelpCircle, LuUpload, LuTrash2 } from 'react-icons/lu';
+import { useSettingsStorage } from '../hooks/useSettingsStorage';
 import CustomSelect from './CustomSelect';
 import { useI18n } from '../i18n';
 import type { Language } from '../i18n/translations';
 import type { Settings, Config, ParsedConfig } from '../types';
 import type { Dispatch, SetStateAction } from 'react';
+import { isTauri } from '../utils/isTauri';
 
 interface SettingsPageProps {
-  settings: Settings;
-  setSettings: Dispatch<SetStateAction<Settings>>;
   setShowLogsModal: (show: boolean) => void;
   configs: Config[];
   setConfigs: Dispatch<SetStateAction<Config[]>>;
@@ -16,87 +16,67 @@ interface SettingsPageProps {
   setActiveConfigId: Dispatch<SetStateAction<string>>;
   setActiveConfigContent: Dispatch<SetStateAction<string | null>>;
   setParsedConfig: Dispatch<SetStateAction<ParsedConfig | null>>;
+  vpnEnabled: boolean;
+  restartVPN: (rulesOverride?: any[]) => Promise<void>;
 }
 
-const isTauri = typeof window !== 'undefined' && '__TAURI__' in window;
-const APP_VERSION = '0.1.0';
-
 export default function SettingsPage({ 
-  settings, 
-  setSettings, 
   setShowLogsModal,
   configs,
   setConfigs,
   activeConfigId,
   setActiveConfigId,
-  setActiveConfigContent,
-  setParsedConfig,
+  vpnEnabled,
+  restartVPN,
 }: SettingsPageProps) {
+  const [settings, setSettings] = useSettingsStorage();
   const { t, language, setLanguage } = useI18n();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [mtuError, setMtuError] = useState(false);
 
-  // Load configs on mount
-  useEffect(() => {
-    if (!isTauri) return;
-    
-    const loadConfigs = async () => {
-      try {
-        const { invoke } = await import('@tauri-apps/api/core');
-        const filenames = await invoke<string[]>('list_configs');
-        const loadedConfigs: Config[] = filenames.map((filename, idx) => ({
-          id: `config-${idx}-${filename}`,
-          name: filename.replace(/\.(yaml|yml)$/, ''),
-          filename,
-        }));
-        setConfigs(loadedConfigs);
-        
-        // Restore active config from localStorage
-        const savedId = localStorage.getItem('vpn-active-config');
-        if (savedId && loadedConfigs.some(c => c.id === savedId)) {
-          setActiveConfigId(savedId);
-        } else if (loadedConfigs.length > 0) {
-          setActiveConfigId(loadedConfigs[0].id);
+  const toggleSetting = useCallback(async (key: keyof Settings) => {
+    try {
+      let nextValue = false;
+      setSettings(prev => {
+        nextValue = !prev[key];
+        return { ...prev, [key]: nextValue };
+      });
+      
+      // If VPN is running and this setting requires a restart, restart the VPN
+      const settingsRequiringRestart: (keyof Settings)[] = ['enableTun', 'killSwitch'];
+      if (vpnEnabled && settingsRequiringRestart.includes(key)) {
+        try {
+          await restartVPN();
+        } catch (e) {
+          console.error('Failed to restart VPN:', e);
+          // Revert the setting if restart fails
+          setSettings(prev => ({ ...prev, [key]: !nextValue }));
         }
-      } catch (e) {
-        console.error('Failed to load configs:', e);
       }
-    };
-    
-    loadConfigs();
-  }, [setConfigs, setActiveConfigId]);
+    } catch (e) {
+      console.error('Error toggling setting:', e);
+      // Revert the setting if there was an error
+      setSettings(prev => ({ ...prev, [key]: prev[key] }));
+    }
+  }, [setSettings, vpnEnabled, restartVPN]);
 
-  // Load config content when selection changes
-  useEffect(() => {
-    if (!activeConfigId || !isTauri) {
-      setActiveConfigContent(null);
-      setParsedConfig(null);
+  const handleMtuChange = useCallback(async (value: string) => {
+    const numValue = parseInt(value, 10);
+    
+    if (value && (numValue < 1280 || numValue > 1500)) {
+      setMtuError(true);
+      setTimeout(() => setMtuError(false), 400);
       return;
     }
     
-    const config = configs.find(c => c.id === activeConfigId);
-    if (!config) return;
-
-    const loadContent = async () => {
-      try {
-        const { invoke } = await import('@tauri-apps/api/core');
-        const content = await invoke<string>('read_config', { filename: config.filename });
-        setActiveConfigContent(content);
-        
-        const parsed = await invoke<ParsedConfig>('parse_config', { configContent: content });
-        setParsedConfig(parsed);
-        
-        localStorage.setItem('vpn-active-config', activeConfigId);
-      } catch (e) {
-        console.error('Failed to load config:', e);
-      }
-    };
+    setSettings(prev => ({ ...prev, mtu: value }));
     
-    loadContent();
-  }, [activeConfigId, configs, setActiveConfigContent, setParsedConfig]);
-
-  const toggleSetting = useCallback((key: keyof Settings) => {
-    setSettings(prev => ({ ...prev, [key]: !prev[key] }));
-  }, [setSettings]);
+    if (vpnEnabled && value) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      await restartVPN();
+    }
+  }, [setSettings, vpnEnabled, restartVPN]);
 
   const handleImportConfig = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -105,7 +85,7 @@ export default function SettingsPage({
     const content = await file.text();
     const filename = file.name;
     
-    if (isTauri) {
+    if (isTauri()) {
       try {
         const { invoke } = await import('@tauri-apps/api/core');
         await invoke('import_config', { configContent: content, filename });
@@ -127,7 +107,7 @@ export default function SettingsPage({
   }, [setConfigs, setActiveConfigId]);
 
   const handleDeleteConfig = useCallback(async () => {
-    if (!activeConfigId || !isTauri) return;
+    if (!activeConfigId || !isTauri()) return;
     
     const config = configs.find(c => c.id === activeConfigId);
     if (!config) return;
@@ -139,10 +119,22 @@ export default function SettingsPage({
       const newConfigs = configs.filter(c => c.id !== activeConfigId);
       setConfigs(newConfigs);
       setActiveConfigId(newConfigs[0]?.id || '');
+      setShowDeleteConfirm(false);
     } catch (e) {
       console.error('Failed to delete config:', e);
     }
   }, [activeConfigId, configs, setConfigs, setActiveConfigId]);
+
+  const handleDeleteClick = useCallback(() => {
+    if (!showDeleteConfirm) {
+      setShowDeleteConfirm(true);
+
+      
+      setTimeout(() => setShowDeleteConfirm(false), 3000);
+    } else {
+      handleDeleteConfig();
+    }
+  }, [showDeleteConfirm, handleDeleteConfig]);
 
   const handleLanguageChange = useCallback((lang: Language) => {
     setLanguage(lang);
@@ -168,12 +160,14 @@ export default function SettingsPage({
             </div>
             <div className="config-actions">
               <button 
-                onClick={handleDeleteConfig} 
+                onClick={handleDeleteClick} 
                 className="config-action-btn config-delete-btn" 
                 disabled={!activeConfigId}
               >
                 <LuTrash2 size={18} />
-                <span className="setting-label">{t.settings.deleteConfig}</span>
+                <span className="setting-label delete-label" style={showDeleteConfirm ? { fontWeight: 700 } : { fontWeight: 200 }}>
+                  {showDeleteConfirm ? t.settings.confirmDelete || 'Confirm?' : t.settings.deleteConfig}
+                </span>
               </button>
               <button 
                 onClick={() => fileInputRef.current?.click()} 
@@ -216,8 +210,31 @@ export default function SettingsPage({
               </div>
             </button>
             <button onClick={() => toggleSetting('killSwitch')} className="panel-row">
-              <span className="setting-label">{t.settings.killSwitch}</span>
+              <span className="setting-label setting-label-with-help">
+                {t.settings.killSwitch}
+                <button
+                  type="button"
+                  className="help-tooltip"
+                  onClick={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  <LuHelpCircle size={14} className="help-icon" />
+                  <span className="help-tooltip-content">{t.settings.killSwitchHelp}</span>
+                </button>
+              </span>
               <div className={`toggle ${settings.killSwitch ? 'on' : ''}`} role="switch" aria-checked={settings.killSwitch}>
+                <div className="toggle-knob" />
+              </div>
+            </button>
+            <button onClick={() => toggleSetting('enableTun')} className="panel-row">
+              <span className="setting-label">{t.settings.enableTun}</span>
+              <div className={`toggle ${settings.enableTun ? 'on' : ''}`} role="switch" aria-checked={settings.enableTun}>
+                <div className="toggle-knob" />
+              </div>
+            </button>
+            <button onClick={() => toggleSetting('snowfall')} className="panel-row">
+              <span className="setting-label">{t.settings.snowfall}</span>
+              <div className={`toggle ${settings.snowfall ? 'on' : ''}`} role="switch" aria-checked={settings.snowfall}>
                 <div className="toggle-knob" />
               </div>
             </button>
@@ -244,12 +261,30 @@ export default function SettingsPage({
           <h3 className="section-heading">{t.settings.advanced}</h3>
           <div className="panel">
             <div className="panel-row disabled">
-              <span className="setting-label">{t.settings.mtu}</span>
+              <span className="setting-label setting-label-with-help">
+                {t.settings.mtu}
+                <button
+                  type="button"
+                  className="help-tooltip"
+                  onClick={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  <LuHelpCircle size={14} className="help-icon" />
+                  <span className="help-tooltip-content">{t.settings.mtuHelp}</span>
+                </button>
+              </span>
               <input 
-                type="text" 
+                type="number" 
+                min="1280"
+                max="1500"
                 value={settings.mtu} 
-                onChange={e => setSettings(prev => ({ ...prev, mtu: e.target.value.replace(/\D/g, '') }))} 
-                className="input" 
+                onChange={e => handleMtuChange(e.target.value.replace(/\D/g, ''))} 
+                onBlur={() => {
+                  if (!settings.mtu) {
+                    setSettings(prev => ({ ...prev, mtu: '1500' }));
+                  }
+                }}
+                className={`input ${mtuError ? 'input-error input-shake' : ''}`}
               />
             </div>
           </div>
@@ -275,7 +310,7 @@ export default function SettingsPage({
           <div className="panel">
             <div className="panel-row disabled">
               <span className="setting-label">{t.settings.version}</span>
-              <span className="setting-value">{APP_VERSION}</span>
+              <span className="setting-value">{__APP_VERSION__}</span>
             </div>
             <div className="panel-row disabled">
               <span className="setting-label">{t.settings.versioncore}</span>
