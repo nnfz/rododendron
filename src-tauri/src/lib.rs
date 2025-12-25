@@ -53,7 +53,7 @@ pub fn run() {
             let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/icon.ico"))?;
 
             #[cfg(not(target_os = "windows"))]
-            let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png"))?;
+            let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/128x128.png"))?;
             let show = MenuItemBuilder::with_id("tray_show", "Show").build(app)?;
             let quit = MenuItemBuilder::with_id("tray_quit", "Quit").build(app)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;
