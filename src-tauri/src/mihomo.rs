@@ -433,10 +433,10 @@ fn get_mihomo_path(app: &AppHandle) -> PathBuf {
 fn get_binary_name() -> &'static str { "mihomo-windows.exe" }
 
 #[cfg(target_os = "macos")]
-fn get_binary_name() -> &'static str { "mihomo-macos" }
+fn get_binary_name() -> &'static str { "mihomo-darwin-amd64" }
 
 #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
-fn get_binary_name() -> &'static str { "mihomo-linux" }
+fn get_binary_name() -> &'static str { "mihomo-linux-amd64" }
 
 #[tauri::command]
 pub fn get_mihomo_binary_name() -> String {
