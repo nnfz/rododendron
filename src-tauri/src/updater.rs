@@ -4,6 +4,8 @@ use std::fs;
 use std::path::PathBuf;
 use tauri::AppHandle;
 
+use crate::mihomo;
+
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
@@ -139,6 +141,24 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
     path.push(&asset.name);
 
     fs::write(&path, &bytes).map_err(|e| format!("Failed to write installer: {e}"))?;
+
+    let _ = mihomo::stop_vpn().await;
+
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/IM", "mihomo.exe"])
+            .creation_flags(0x08000000)
+            .output();
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        let _ = std::process::Command::new("pkill")
+            .arg("-9")
+            .arg("mihomo")
+            .output();
+    }
 
     spawn_installer(&path).map_err(|e| format!("Failed to launch installer: {e}"))?;
 
