@@ -591,6 +591,7 @@ fn parse_rule_string(rule_str: &str, _idx: usize) -> Option<ParsedRule> {
         rule_type,
         target,
         action,
+        raw: rule_str.to_string(),
     })
 }
 
