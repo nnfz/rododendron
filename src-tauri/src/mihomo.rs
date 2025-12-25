@@ -5,6 +5,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::io::{BufRead, BufReader, Write};
 use std::collections::HashSet;
+use std::sync::LazyLock;
 use std::thread;
 use tauri::{AppHandle, Manager};
 
@@ -12,6 +13,75 @@ use tauri::{AppHandle, Manager};
 use std::os::windows::process::CommandExt;
 
 static MIHOMO_PROCESS: Mutex<Option<Child>> = Mutex::new(None);
+
+#[derive(Clone)]
+struct ControllerConfig {
+    host: String,
+    port: u16,
+    secret: Option<String>,
+}
+
+static CONTROLLER_CONFIG: LazyLock<Mutex<ControllerConfig>> = LazyLock::new(|| {
+    Mutex::new(ControllerConfig {
+        host: String::from("127.0.0.1"),
+        port: 9090,
+        secret: None,
+    })
+});
+
+fn update_controller_config(config_content: &str) {
+    let yaml: serde_yaml::Value = match serde_yaml::from_str(config_content) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+
+    let ext = yaml
+        .get("external-controller")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+
+    let secret = yaml
+        .get("secret")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let mut next = ControllerConfig {
+        host: "127.0.0.1".to_string(),
+        port: 9090,
+        secret,
+    };
+
+    if !ext.is_empty() {
+        // Typical values:
+        // - 127.0.0.1:9090
+        // - 0.0.0.0:9090
+        // - :9090
+        // - http://127.0.0.1:9090 (rare)
+        let ext = ext.strip_prefix("http://").unwrap_or(ext);
+        let ext = ext.strip_prefix("https://").unwrap_or(ext);
+
+        if let Some((h, p)) = ext.rsplit_once(':') {
+            if !h.trim().is_empty() {
+                next.host = h.trim().to_string();
+            }
+            if let Ok(port) = p.trim().parse::<u16>() {
+                next.port = port;
+            }
+        } else if let Ok(port) = ext.parse::<u16>() {
+            next.port = port;
+        }
+    }
+
+    if next.host == "0.0.0.0" || next.host == "::" {
+        next.host = "127.0.0.1".to_string();
+    }
+
+    if let Ok(mut guard) = CONTROLLER_CONFIG.lock() {
+        *guard = next;
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MihomoTraffic {
@@ -153,10 +223,17 @@ pub struct LogEntry {
 
 async fn mihomo_get_json<T: for<'de> Deserialize<'de>>(paths: &[&str]) -> Result<T, String> {
     let client = reqwest::Client::new();
+    let cfg = CONTROLLER_CONFIG.lock().map_err(|e| e.to_string())?.clone();
     let mut last_err: Option<String> = None;
 
     for path in paths {
-        match client.get(*path).send().await {
+        let url = format!("http://{}:{}{}", cfg.host, cfg.port, path);
+        let mut req = client.get(url);
+        if let Some(secret) = &cfg.secret {
+            req = req.header(reqwest::header::AUTHORIZATION, format!("Bearer {}", secret));
+        }
+
+        match req.send().await {
             Ok(resp) => {
                 if !resp.status().is_success() {
                     last_err = Some(format!("HTTP {} for {}", resp.status(), path));
@@ -175,10 +252,17 @@ async fn mihomo_get_json<T: for<'de> Deserialize<'de>>(paths: &[&str]) -> Result
 
 async fn mihomo_get_json_value(paths: &[&str]) -> Result<serde_json::Value, String> {
     let client = reqwest::Client::new();
+    let cfg = CONTROLLER_CONFIG.lock().map_err(|e| e.to_string())?.clone();
     let mut last_err: Option<String> = None;
 
     for path in paths {
-        match client.get(*path).send().await {
+        let url = format!("http://{}:{}{}", cfg.host, cfg.port, path);
+        let mut req = client.get(url);
+        if let Some(secret) = &cfg.secret {
+            req = req.header(reqwest::header::AUTHORIZATION, format!("Bearer {}", secret));
+        }
+
+        match req.send().await {
             Ok(resp) => {
                 if !resp.status().is_success() {
                     last_err = Some(format!("HTTP {} for {}", resp.status(), path));
@@ -236,8 +320,8 @@ fn value_to_u64(v: Option<&serde_json::Value>) -> u64 {
 #[tauri::command]
 pub async fn mihomo_get_traffic() -> Result<MihomoTraffic, String> {
     let v = mihomo_get_json_value(&[
-        "http://127.0.0.1:9090/v1/traffic",
-        "http://127.0.0.1:9090/traffic",
+        "/v1/traffic",
+        "/traffic",
     ])
     .await?;
 
@@ -251,8 +335,8 @@ pub async fn mihomo_get_traffic() -> Result<MihomoTraffic, String> {
 #[tauri::command]
 pub async fn mihomo_get_proxies() -> Result<serde_json::Value, String> {
     mihomo_get_json_value(&[
-        "http://127.0.0.1:9090/v1/proxies",
-        "http://127.0.0.1:9090/proxies",
+        "/v1/proxies",
+        "/proxies",
     ])
     .await
 }
@@ -260,8 +344,8 @@ pub async fn mihomo_get_proxies() -> Result<serde_json::Value, String> {
 #[tauri::command]
 pub async fn mihomo_get_connections() -> Result<serde_json::Value, String> {
     mihomo_get_json_value(&[
-        "http://127.0.0.1:9090/v1/connections",
-        "http://127.0.0.1:9090/connections",
+        "/v1/connections",
+        "/connections",
     ])
     .await
 }
@@ -270,17 +354,63 @@ pub async fn mihomo_get_connections() -> Result<serde_json::Value, String> {
 pub async fn mihomo_get_delay(proxy_name: String) -> Result<serde_json::Value, String> {
     let encoded = urlencoding::encode(&proxy_name);
     let p1 = format!(
-        "http://127.0.0.1:9090/v1/proxies/{}/delay?timeout=5000&url=https%3A%2F%2F1.1.1.1",
+        "/v1/proxies/{}/delay?timeout=5000&url=https%3A%2F%2F1.1.1.1",
         encoded
     );
     let p2 = format!(
-        "http://127.0.0.1:9090/proxies/{}/delay?timeout=5000&url=https%3A%2F%2F1.1.1.1",
+        "/proxies/{}/delay?timeout=5000&url=https%3A%2F%2F1.1.1.1",
         encoded
     );
 
-    let p1s = p1.as_str();
-    let p2s = p2.as_str();
-    mihomo_get_json(&[p1s, p2s]).await
+    mihomo_get_json(&[p1.as_str(), p2.as_str()]).await
+}
+
+fn parse_ping_ms(output: &str) -> Option<u32> {
+    let lower = output.to_lowercase();
+    for marker in ["time=", "time<", "время=", "время<"] {
+        if let Some(idx) = lower.find(marker) {
+            let rest = &lower[idx + marker.len()..];
+            let digits: String = rest.chars().skip_while(|c| !c.is_ascii_digit()).take_while(|c| c.is_ascii_digit()).collect();
+            if let Ok(v) = digits.parse::<u32>() {
+                return Some(v.max(1));
+            }
+        }
+    }
+    None
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn ping_host(host: String) -> Result<Option<u32>, String> {
+    let host = host.trim().to_string();
+    if host.is_empty() {
+        return Ok(None);
+    }
+    if host.chars().any(|c| c.is_whitespace()) {
+        return Err("Invalid host".to_string());
+    }
+
+    let mut cmd = if cfg!(target_os = "windows") {
+        let mut c = Command::new("ping");
+        c.args(["-n", "1", "-w", "1000", &host]);
+        c
+    } else {
+        let mut c = Command::new("ping");
+        c.args(["-c", "1", "-W", "1", &host]);
+        c
+    };
+
+    #[cfg(target_os = "windows")]
+    {
+        // CREATE_NO_WINDOW
+        cmd.creation_flags(0x08000000);
+    }
+
+    let out = cmd.output().map_err(|e| format!("Failed to run ping: {e}"))?;
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+    let combined = format!("{}\n{}", stdout, stderr);
+
+    Ok(parse_ping_ms(&combined))
 }
 
 fn get_mihomo_path(app: &AppHandle) -> PathBuf {
@@ -469,6 +599,15 @@ pub fn generate_config(
         .map_err(|e| format!("Failed to parse YAML: {}", e))?;
 
     yaml["log-level"] = serde_yaml::Value::String(log_level.to_lowercase());
+
+    let has_controller = yaml
+        .get("external-controller")
+        .and_then(|v| v.as_str())
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false);
+    if !has_controller {
+        yaml["external-controller"] = serde_yaml::Value::String("127.0.0.1:9090".to_string());
+    }
 
     // IMPORTANT:
     // If frontend sends no rules (e.g. during startup before rules are loaded),
@@ -672,6 +811,8 @@ pub async fn start_vpn(
     spawn_log_reader(stdout, stderr, log_path);
 
     *process_guard = Some(child);
+
+    update_controller_config(&config_content);
 
     let parsed = parse_config(config_content)?;
     Ok(VpnStatus {

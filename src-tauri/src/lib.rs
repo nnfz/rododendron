@@ -9,7 +9,7 @@ use mihomo::{
     start_vpn, stop_vpn, get_vpn_status,
     list_configs, read_config, delete_config,
     save_rules_to_config, save_rules_to_path, resolve_config_path, get_mihomo_logs,
-    mihomo_get_traffic, mihomo_get_proxies, mihomo_get_connections, mihomo_get_delay,
+    mihomo_get_traffic, mihomo_get_proxies, mihomo_get_connections, mihomo_get_delay, ping_host,
 };
 
 use autostart::set_autostart;
@@ -19,6 +19,27 @@ use updater::{check_for_updates, install_update};
 use tauri::Manager;
 use tauri::{menu::{Menu, MenuItemBuilder}, tray::TrayIconBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
+
+use std::sync::{LazyLock, Mutex};
+
+#[derive(Clone, Copy)]
+enum CloseBehavior {
+    Tray,
+    Exit,
+}
+
+static CLOSE_BEHAVIOR: LazyLock<Mutex<CloseBehavior>> = LazyLock::new(|| Mutex::new(CloseBehavior::Tray));
+
+#[tauri::command(rename_all = "camelCase")]
+fn set_close_behavior(behavior: String) -> Result<(), String> {
+    let next = match behavior.as_str() {
+        "exit" => CloseBehavior::Exit,
+        _ => CloseBehavior::Tray,
+    };
+    let mut guard = CLOSE_BEHAVIOR.lock().map_err(|e| e.to_string())?;
+    *guard = next;
+    Ok(())
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -74,7 +95,24 @@ pub fn run() {
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
-                let _ = window.hide();
+                let app = window.app_handle().clone();
+                let win = window.clone();
+                let behavior = CLOSE_BEHAVIOR
+                    .lock()
+                    .map(|v| *v)
+                    .unwrap_or(CloseBehavior::Tray);
+
+                match behavior {
+                    CloseBehavior::Exit => {
+                        tauri::async_runtime::spawn(async move {
+                            let _ = stop_vpn().await;
+                            app.exit(0);
+                        });
+                    }
+                    CloseBehavior::Tray => {
+                        let _ = win.hide();
+                    }
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -83,6 +121,7 @@ pub fn run() {
             generate_config,
             import_config,
             set_autostart,
+            set_close_behavior,
             start_vpn,
             stop_vpn,
             get_vpn_status,
@@ -97,6 +136,7 @@ pub fn run() {
             mihomo_get_proxies,
             mihomo_get_connections,
             mihomo_get_delay,
+            ping_host,
             check_for_updates,
             install_update,
         ])

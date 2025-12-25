@@ -19,6 +19,7 @@ export interface Settings {
   autostart: boolean;
   startminimized: boolean;
   autoConnect: boolean;
+  closeBehavior: 'tray' | 'exit';
   killSwitch: boolean;
   logLevel: string;
   mtu: string;

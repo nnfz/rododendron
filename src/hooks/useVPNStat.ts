@@ -7,7 +7,7 @@ interface TrafficStats {
   down: number;
 }
 
-export function useVPNStats(vpnEnabled: boolean, proxyName: string) {
+export function useVPNStats(vpnEnabled: boolean, pingHost: string) {
 
   const [uptime, setUptime] = useState({ hours: 0, minutes: 0, seconds: 0 });
   const [traffic, setTraffic] = useState<TrafficStats>({ up: 0, down: 0 });
@@ -183,33 +183,14 @@ export function useVPNStats(vpnEnabled: boolean, proxyName: string) {
     const fetchDelay = async () => {
       try {
         if (stopRef.current) return;
-        const data = await invokeTauri<any>('mihomo_get_proxies');
-
-        const proxies = data?.proxies;
-        const globalNow = proxies?.GLOBAL?.now;
-        const effectiveProxyName = (proxies?.[proxyName] ? proxyName : globalNow) || proxyName;
-
-        // IMPORTANT: Always trigger a fresh delay measurement; proxy history can be stale.
-        try {
-          const delay = await invokeTauri<any>('mihomo_get_delay', { proxyName: effectiveProxyName });
-          if (!stopRef.current) setLatency(delay?.delay ?? null);
-          delayFailCountRef.current = 0;
-          return;
-        } catch (_e) {
-          // fallback to history if delay endpoint fails
-        }
-
-        const proxyData = proxies?.[effectiveProxyName];
-        if (proxyData?.history?.length > 0) {
-          const lastHistory = proxyData.history[proxyData.history.length - 1];
-          if (!stopRef.current) setLatency(lastHistory.delay ?? null);
-          delayFailCountRef.current = 0;
-        }
+        const target = pingHost?.trim() || '1.1.1.1';
+        const ms = await invokeTauri<number | null>('ping_host', { host: target });
+        if (!stopRef.current) setLatency(typeof ms === 'number' ? ms : null);
+        delayFailCountRef.current = 0;
       } catch (e) {
-        // API not ready yet - это нормально при запуске
         delayFailCountRef.current += 1;
         if (delayFailCountRef.current === 1) {
-          console.warn('Proxies API not ready:', e);
+          console.warn('Ping not ready:', e);
         }
         if (delayFailCountRef.current >= 3) {
           if (!stopRef.current) setLatency(null);
@@ -237,7 +218,7 @@ export function useVPNStats(vpnEnabled: boolean, proxyName: string) {
       clearInterval(delayInterval);
       statsIntervalRef.current = null;
     };
-  }, [vpnEnabled, proxyName]);
+  }, [vpnEnabled, pingHost]);
 
   const formatUptime = () => {
     const pad = (n: number) => String(n).padStart(2, '0');

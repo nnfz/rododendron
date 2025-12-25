@@ -120,8 +120,8 @@ export default function App() {
 
 
   // Global VPN statistics
-  const proxyName = vpnStatus?.proxy_name || parsedConfig?.proxy_name || 'Unknown';
-  const { traffic, latency, formatUptime, formatTraffic } = useVPNStats(vpnEnabled, proxyName);
+  const pingHost = vpnStatus?.server || parsedConfig?.server_address || '1.1.1.1';
+  const { traffic, latency, formatUptime, formatTraffic } = useVPNStats(vpnEnabled, pingHost);
 
   const restartVPN = useCallback(async (rulesOverride?: Rule[]) => {
     // Coalesce rapid changes: keep only the latest rules snapshot.
@@ -200,6 +200,19 @@ export default function App() {
     };
     run();
   }, [settings.autostart]);
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    const run = async () => {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        await invoke('set_close_behavior', { behavior: settings.closeBehavior });
+      } catch (e) {
+        console.error('Failed to set close behavior:', e);
+      }
+    };
+    run();
+  }, [settings.closeBehavior]);
 
   useRulesStorage(rules, setRules);
 

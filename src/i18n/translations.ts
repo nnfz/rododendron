@@ -73,6 +73,9 @@ export type Translations = {
     autoLaunch: string;
     enableTun: string;
     startminimized: string;
+    closeBehavior: string;
+    closeToTray: string;
+    closeExit: string;
     killSwitch: string;
     killSwitchHelp: string;
     advanced: string;
@@ -181,6 +184,9 @@ export const translations: Record<Language, Translations> = {
       mainSettings: 'Main Settings',
       autoConnect: 'Auto connect',
       startminimized: 'Start minimized',
+      closeBehavior: 'Close button behavior',
+      closeToTray: 'Minimize to tray',
+      closeExit: 'Exit app',
       snowfall: 'Snowfall',
       autoLaunch: 'Auto launch',
       confirmDelete: 'Are you sure?',
@@ -295,6 +301,9 @@ export const translations: Record<Language, Translations> = {
       startminimized: 'Запускать свёрнутым',
       confirmDelete: 'Вы уверены?',
       autoConnect: 'Автоподключение',
+      closeBehavior: 'Поведение кнопки закрытия',
+      closeToTray: 'Сворачивать в трей',
+      closeExit: 'Закрывать приложение',
       killSwitch: 'Kill Switch',
       killSwitchHelp: 'Блокирует интернет при разрыве VPN, чтобы не было утечек трафика.',
       advanced: 'Продвинутые',
@@ -404,6 +413,9 @@ export const translations: Record<Language, Translations> = {
       autoLaunch: 'Аўтазапуск',
       autoConnect: 'Аўтападключэнне',
       startminimized: 'Запускаць згорнутым',
+      closeBehavior: 'Паводзіны кнопкі закрыцця',
+      closeToTray: 'Згортваць у трей',
+      closeExit: 'Закрываць праграму',
       killSwitch: 'Kill Switch',
       killSwitchHelp: 'Блакуе інтэрнэт пры разрыве VPN, каб не было ўцечак трафіку.',
       advanced: 'Пашыраныя',

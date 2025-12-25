@@ -640,7 +640,7 @@ select.input option {
 /* Custom Select Component */
 .custom-select-container {
   position: relative;
-  width: 10rem;
+  min-width: 11rem;
   z-index: 10000;
 }
 

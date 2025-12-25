@@ -311,6 +311,19 @@ export default function SettingsPage({
                 <div className="toggle-knob" />
               </div>
             </button>
+
+            <div className="panel-row disabled">
+              <span className="setting-label">{t.settings.closeBehavior}</span>
+              <CustomSelect
+                value={settings.closeBehavior}
+                onChange={(value) => setSettings(prev => ({ ...prev, closeBehavior: value as Settings['closeBehavior'] }))}
+                options={[
+                  { value: 'tray', label: t.settings.closeToTray },
+                  { value: 'exit', label: t.settings.closeExit },
+                ]}
+              />
+            </div>
+
             <button onClick={() => toggleSetting('killSwitch')} className="panel-row">
               <span className="setting-label setting-label-with-help">
                 {t.settings.killSwitch}
