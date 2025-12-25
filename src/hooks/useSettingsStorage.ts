@@ -13,7 +13,7 @@ const DEFAULT_SETTINGS: Settings = {
   killSwitch: false,
   logLevel: 'info',
   mtu: '1500',
-  enableTun: true,
+  enableTun: false,
   snowfall: true
 };
 

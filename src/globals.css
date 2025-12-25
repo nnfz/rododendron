@@ -29,6 +29,7 @@ body {
   color: var(--fg);
   margin: 0;
   user-select: none;
+  -webkit-user-select:none;
 }
 
 /* Scrollbars */
@@ -109,6 +110,7 @@ body {
   max-height: 0;
   overflow: hidden;
   filter: blur(2px);
+  -webkit-filter: blur(2px);
   opacity: 0;
   padding-top: 0;
   padding-bottom: 0;
@@ -117,7 +119,6 @@ body {
 
 .collapsible.open {
   max-height: 420px;
-  filter: blur(0px);
   opacity: 1;
   padding-top: 0.5rem;
   padding-bottom: 0.5rem;
@@ -149,6 +150,7 @@ body {
   justify-content: space-between;
   -webkit-app-region: drag;
   user-select: none;
+  app-region: drag;
   z-index: 10001;
 }
 
@@ -238,6 +240,7 @@ body {
   width: 16rem;
   background: rgba(15, 15, 15, 0.45);
   backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
@@ -966,12 +969,14 @@ select.input option {
 
 .ip{
   filter: blur(8px);
+  -webkit-filter: blur(8px);
   clip-path: fill-box;
   transition: .1s ease;
 }
 
 .ip:hover{
   filter: blur(0px);  
+  -webkit-filter: blur(0px);
 }
 
 .meta-row {
@@ -1002,6 +1007,7 @@ select.input option {
   height: 0.5rem;
   background: transparent;
   filter: blur(8px);
+  -webkit-filter: blur(8px);
   border-radius: 9999px;
   display: inline-block;
   transition: 0.3s ease;
@@ -1012,6 +1018,7 @@ select.input option {
 
 .status-dot.active {
   filter: blur(0px);
+  -webkit-filter: blur(0px);
   background: var(--accent);
 }
 
@@ -1145,6 +1152,7 @@ select.input option {
   inset: 0;
   background: rgba(0, 0, 0, 0.7);
   backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1160,6 +1168,7 @@ select.input option {
   align-items: stretch;
   justify-content: stretch;
   backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   padding: 24px;
 }
 

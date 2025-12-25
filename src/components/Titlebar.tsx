@@ -43,7 +43,7 @@ function Titlebar({ showSidebarToggle, sidebarOpen, onToggleSidebar, closeBehavi
 
   return (
     <div data-tauri-drag-region className="titlebar">
-      <div className="titlebar-left" data-tauri-drag-region>
+      <div className="titlebar-left">
         {showSidebarToggle && (
           <button
             type="button"
@@ -55,7 +55,7 @@ function Titlebar({ showSidebarToggle, sidebarOpen, onToggleSidebar, closeBehavi
           </button>
         )}
       </div>
-      <div className="titlebar-title" data-tauri-drag-region>Rododendron</div>
+      <div className="titlebar-title">Rododendron</div>
       <div className="titlebar-controls">
         <button className="titlebar-btn" onClick={handleMinimize} aria-label={t.common.minimize}>
           <LuMinus size={14} />
