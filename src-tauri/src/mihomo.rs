@@ -835,6 +835,13 @@ pub async fn start_vpn(
     config_filename: String,
     enable_tun: bool,
 ) -> Result<VpnStatus, String> {
+    #[cfg(not(target_os = "windows"))]
+    {
+        if enable_tun && !has_admin_privileges() {
+            return Err("TUN requires elevated privileges on this OS. Please disable TUN in settings or run the app with sudo/root.".to_string());
+        }
+    }
+
     let _ = enable_tun;
     // Убиваем все существующие процессы mihomo
     kill_existing_mihomo();

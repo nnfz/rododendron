@@ -156,7 +156,7 @@ body {
   display: flex;
   align-items: center;
   gap: 0.25rem;
-  -webkit-app-region: no-drag;
+  -webkit-app-region: drag;
 }
 
 .titlebar-title {
@@ -199,6 +199,7 @@ body {
   border-radius: 0;
   padding: 0;
   animation: titlebarButtonHover 0.9s ease;
+  -webkit-app-region: no-drag;
 }
 
 .titlebar-btn.sidebar-toggle.active {
