@@ -778,6 +778,20 @@ pub async fn save_rules_to_path(path: String, user_rules: Vec<UserRule>) -> Resu
 }
 
 #[tauri::command(rename_all = "camelCase")]
+pub fn export_config_to_path(app: AppHandle, filename: String, path: String) -> Result<(), String> {
+    let src_path = find_existing_config_path(&app, &filename)
+        .ok_or_else(|| format!("Config file not found: {}", filename))?;
+
+    let content = fs::read_to_string(&src_path)
+        .map_err(|e| format!("Failed to read config {}: {}", filename, e))?;
+
+    let dst_path = PathBuf::from(path);
+    fs::write(&dst_path, content)
+        .map_err(|e| format!("Failed to export config to {:?}: {}", dst_path, e))?;
+    Ok(())
+}
+
+#[tauri::command(rename_all = "camelCase")]
 pub async fn start_vpn(
     app: AppHandle,
     config_content: String,

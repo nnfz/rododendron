@@ -184,9 +184,6 @@ export default function SettingsPage({
     try {
       const { invoke } = await import('@tauri-apps/api/core');
       const { save } = await import('@tauri-apps/plugin-dialog');
-      const { writeTextFile } = await import('@tauri-apps/plugin-fs');
-
-      const content = await invoke<string>('read_config', { filename: config.filename });
 
       const filePath = await save({
         defaultPath: config.filename,
@@ -194,7 +191,7 @@ export default function SettingsPage({
       });
 
       if (!filePath) return;
-      await writeTextFile(filePath, content);
+      await invoke('export_config_to_path', { filename: config.filename, path: filePath });
     } catch (e) {
       console.error('Failed to export config:', e);
     }

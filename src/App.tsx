@@ -11,6 +11,7 @@ import { useVPNStats } from './hooks/useVPNStat';
 import { useSettingsStorage } from './hooks/useSettingsStorage';
 import { useRulesStorage } from './hooks/useRulesStorage';
 import type { Rule, Log, LogLevel, Config, ParsedConfig } from './types';
+import { useI18n } from './i18n';
 import { isTauri } from './utils/isTauri';
 
 function formatTime(date: Date): string {
@@ -18,6 +19,7 @@ function formatTime(date: Date): string {
 }
 
 export default function App() {
+  const { t } = useI18n();
   const initialLoadDone = useRef(false);
   const autoConnectTriggeredRef = useRef(false);
   const autoConnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -34,6 +36,8 @@ export default function App() {
   const [configRulesLoaded, setConfigRulesLoaded] = useState<string | null>(null);
   const [settings, setSettings] = useSettingsStorage();
   const [logs, setLogs] = useState<Log[]>([]);
+  const [configsLoaded, setConfigsLoaded] = useState(false);
+  const [dismissNoConfigSplash, setDismissNoConfigSplash] = useState(false);
   
   const [configs, setConfigs] = useState<Config[]>([]);
   const [activeConfigId, setActiveConfigId] = useState<string>('');
@@ -65,6 +69,7 @@ export default function App() {
           filename,
         }));
         setConfigs(loadedConfigs);
+        setConfigsLoaded(true);
         
         // Restore active config
         const savedActive = localStorage.getItem('vpn-active-config');
@@ -75,11 +80,28 @@ export default function App() {
         }
       } catch (e) {
         console.error('Failed to load configs:', e);
+        setConfigsLoaded(true);
       }
     };
     
     loadConfigs();
   }, []);
+
+  useEffect(() => {
+    if (!configsLoaded) return;
+    if (configs.length > 0) {
+      setDismissNoConfigSplash(false);
+    }
+  }, [configsLoaded, configs.length]);
+
+  const noConfigs = configsLoaded && configs.length === 0;
+
+  useEffect(() => {
+    if (!noConfigs) return;
+    if (activePage !== 'settings') {
+      setActivePage('settings');
+    }
+  }, [noConfigs, activePage]);
 
   // Update activeConfigFilename when activeConfigId changes
   useEffect(() => {
@@ -378,11 +400,12 @@ export default function App() {
   }, [activePage, isNarrowLayout]);
 
   const setActiveTab = useCallback((tab: 'home' | 'rules' | 'settings') => {
+    if (noConfigs && tab !== 'settings') return;
     setActivePage(tab);
     if (isNarrowLayout) {
       setSidebarOpen(false);
     }
-  }, [isNarrowLayout]);
+  }, [isNarrowLayout, noConfigs]);
   const pageContent = useMemo(() => {
     switch (activePage) {
       case 'home':
@@ -450,8 +473,32 @@ export default function App() {
   ]);
 
   return (
-   
+    
     <div className="app-root">
+      {configsLoaded && configs.length === 0 && !dismissNoConfigSplash && (
+        <div className="no-config-overlay">
+          <div className="no-config-card">
+            <div className="no-config-title">
+              {t.welcome.addConfigTitle}
+            </div>
+            <div className="no-config-subtitle">
+              {t.welcome.addConfigSubtitle}
+            </div>
+            <div className="no-config-actions">
+              <button
+                type="button"
+                className="btn btn-primary-dark"
+                onClick={() => {
+                  setActivePage('settings');
+                  setDismissNoConfigSplash(true);
+                }}
+              >
+                {t.welcome.openSettings}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {settings.snowfall && (
         <Snowfall
           color="white"

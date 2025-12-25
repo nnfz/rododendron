@@ -99,6 +99,12 @@ export type Translations = {
     export: string;
     clear: string;
   };
+  welcome: {
+    addConfigTitle: string;
+    addConfigSubtitle: string;
+    openSettings: string;
+    continueWithoutConfig: string;
+  };
   common: {
     save: string;
     edit: string;
@@ -214,6 +220,12 @@ export const translations: Record<Language, Translations> = {
       export: 'Export',
       clear: 'Clear',
     },
+    welcome: {
+      addConfigTitle: 'Add a config',
+      addConfigSubtitle: 'Without a config the app will not work.',
+      openSettings: 'Open settings',
+      continueWithoutConfig: 'Continue without config',
+    },
     common: {
       save: 'Save',
       edit: 'Edit',
@@ -328,6 +340,12 @@ export const translations: Record<Language, Translations> = {
       export: 'Экспорт',
       clear: 'Очистить',
     },
+    welcome: {
+      addConfigTitle: 'Добавьте конфиг',
+      addConfigSubtitle: 'Без конфига приложение не будет работать =(',
+      openSettings: 'Открыть настройки',
+      continueWithoutConfig: 'Пока без конфига',
+    },
     common: {
       save: 'Сохранить',
       edit: 'Редактировать',
@@ -440,6 +458,12 @@ export const translations: Record<Language, Translations> = {
       title: 'Логі праграмы',
       export: 'Экспарт',
       clear: 'Очистіць',
+    },
+    welcome: {
+      addConfigTitle: 'Дадайце канфіг',
+      addConfigSubtitle: 'Без канфіга праграма не будзе працаваць.',
+      openSettings: 'Адкрыць налады',
+      continueWithoutConfig: 'Пакуль без канфіга',
     },
     common: {
       save: 'Захаваць',
