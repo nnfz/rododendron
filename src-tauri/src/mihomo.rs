@@ -591,6 +591,8 @@ fn parse_rule_string(rule_str: &str, _idx: usize) -> Option<ParsedRule> {
         rule_type,
         target,
         action,
+    })
+}
 
 #[tauri::command(rename_all = "camelCase")]
 pub fn generate_config(
@@ -635,7 +637,24 @@ pub fn generate_config(
     let mut tun = serde_yaml::Mapping::new();
     tun.insert("enable".into(), serde_yaml::Value::Bool(enable_tun));
     if let Some(mtu) = mtu {
-        // ... (rest of the code remains the same)
+        tun.insert(
+            "mtu".into(),
+            serde_yaml::Value::Number(serde_yaml::Number::from(mtu)),
+        );
+    }
+
+    tun.insert(
+        "auto-detect-interface".into(),
+        serde_yaml::Value::Bool(true),
+    );
+    tun.insert("stack".into(), serde_yaml::Value::String("gvisor".to_string()));
+    tun.insert("auto-route".into(), serde_yaml::Value::Bool(true));
+    tun.insert("device".into(), serde_yaml::Value::String("Mihomo".to_string()));
+    tun.insert(
+        "dns-hijack".into(),
+        serde_yaml::Value::Sequence(vec![serde_yaml::Value::String("any:53".to_string())]),
+    );
+    yaml["tun"] = serde_yaml::Value::Mapping(tun);
 
     serde_yaml::to_string(&yaml).map_err(|e| format!("Failed to serialize YAML: {}", e))
 }
