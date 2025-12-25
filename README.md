@@ -3,7 +3,6 @@
 > Currently in beta
 
 
-> Screenshots
 ![Main screen full](.github/assets/rododendronscrinmain.png)
 
 

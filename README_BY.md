@@ -3,7 +3,7 @@
 > На дадзены момант у бэце
 
 
-> Скрыншоты
+
 ![Main screen full](.github/assets/rododendronscrinmain.png)
 
 
