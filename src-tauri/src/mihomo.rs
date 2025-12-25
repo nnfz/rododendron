@@ -566,6 +566,7 @@ fn parse_rule_string(rule_str: &str, _idx: usize) -> Option<ParsedRule> {
     if rule_type_str == "MATCH" {
         return None;
     }
+    
 
     let rule_type = match rule_type_str {
         "PROCESS-NAME" => "process",
@@ -687,7 +688,34 @@ pub async fn import_config(app: AppHandle, config_content: String, filename: Str
     fs::create_dir_all(&config_dir)
         .map_err(|e| format!("Failed to create config dir: {}", e))?;
     let config_path = config_dir.join(&filename);
-    fs::write(&config_path, &config_content)
+
+    let content_to_write = match serde_yaml::from_str::<serde_yaml::Value>(&config_content) {
+        Ok(mut yaml) => {
+            let should_rewrite_match = yaml
+                .get("rules")
+                .and_then(|r| r.as_sequence())
+                .and_then(|seq| {
+                    if seq.len() != 1 {
+                        return None;
+                    }
+                    seq[0].as_str().map(|s| s.trim().to_string())
+                })
+                .is_some_and(|s| s == "MATCH,DIRECT");
+
+            if should_rewrite_match {
+                yaml["rules"] = serde_yaml::Value::Sequence(vec![serde_yaml::Value::String(
+                    "MATCH,PROXY".to_string(),
+                )]);
+
+                serde_yaml::to_string(&yaml).unwrap_or(config_content)
+            } else {
+                config_content
+            }
+        }
+        Err(_) => config_content,
+    };
+
+    fs::write(&config_path, &content_to_write)
         .map_err(|e| format!("Failed to save config: {}", e))?;
     Ok(config_path.to_string_lossy().to_string())
 }

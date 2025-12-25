@@ -1,37 +1,64 @@
+import { memo } from 'react';
 import { useI18n } from '../i18n';
 import { LuLoader2 } from 'react-icons/lu';
 import type { VpnStatus } from '../types';
+import { useVPNStats } from '../hooks/useVPNStat';
 
 interface HomePageProps {
   vpnEnabled: boolean;
   vpnStatus: VpnStatus | null;
   parsedConfig: any | null;
+  connectedConfigSnapshot?: {
+    proxy_name: string | null;
+    server_address: string | null;
+    mixed_port: number | null;
+  } | null;
+  homeDisplaySnapshot?: {
+    proxyName: string;
+    serverName: string;
+    port: number;
+  } | null;
+  activeConfigName?: string | null;
+  pollingEnabled?: boolean;
   isConnecting: boolean;
   error: string | null;
   toggleVPN: () => Promise<void>;
   hasConfig: boolean;
-  uptime: string;
-  traffic: { up: string; down: string };
-  latency: number | null;
-  restartVPN: (rulesOverride?: any[]) => Promise<void>;
 }
 
-export default function HomePage({ 
+function HomePage({ 
   vpnEnabled, 
   vpnStatus, 
   parsedConfig,
+  connectedConfigSnapshot,
+  homeDisplaySnapshot,
+  activeConfigName,
+  pollingEnabled = true,
   isConnecting,
   error,
   toggleVPN, 
   hasConfig,
-  uptime,
-  traffic,
-  latency,
 }: HomePageProps) {
   const { t } = useI18n();
-  const serverName = vpnStatus?.server || parsedConfig?.server_address || 'Not configured';
-  const proxyName = vpnStatus?.proxy_name || parsedConfig?.proxy_name || 'Unknown';
-  const port = vpnStatus?.port || parsedConfig?.mixed_port || 7890;
+  const { traffic, latency, formatUptime, formatTraffic } = useVPNStats(vpnEnabled, pollingEnabled);
+  const uptime = formatUptime();
+  const trafficUp = formatTraffic(traffic.up);
+  const trafficDown = formatTraffic(traffic.down);
+  const serverName =
+    homeDisplaySnapshot?.serverName ??
+    (vpnEnabled
+      ? (vpnStatus?.server || connectedConfigSnapshot?.server_address || 'Not configured')
+      : (parsedConfig?.server_address || 'Not configured'));
+  const proxyName =
+    homeDisplaySnapshot?.proxyName ??
+    (vpnEnabled
+      ? (vpnStatus?.proxy_name || connectedConfigSnapshot?.proxy_name || activeConfigName || 'Unknown')
+      : (parsedConfig?.proxy_name || activeConfigName || 'Unknown'));
+  const port =
+    homeDisplaySnapshot?.port ??
+    (vpnEnabled
+      ? (vpnStatus?.port || connectedConfigSnapshot?.mixed_port || 7890)
+      : (parsedConfig?.mixed_port || 7890));
 
   const handleClick = () => {
     if (!isConnecting) {
@@ -105,11 +132,11 @@ export default function HomePage({
             </div>
             <div className="meta-row">
               <span className="meta-label">{t.home.upload}:</span>
-              <span className="meta-value muted">{traffic.up}</span>
+              <span className="meta-value muted">{trafficUp}</span>
             </div>
             <div className="meta-row">
               <span className="meta-label">{t.home.download}:</span>
-              <span className="meta-value muted">{traffic.down}</span>
+              <span className="meta-value muted">{trafficDown}</span>
             </div>
           </div>
         </div>
@@ -117,3 +144,5 @@ export default function HomePage({
     </div>
   );
 }
+
+export default memo(HomePage);

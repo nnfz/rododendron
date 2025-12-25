@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import type { Dispatch, SetStateAction } from 'react';
 import Snowfall from 'react-snowfall';
 import Titlebar from './components/Titlebar';
 import Sidebar from './components/Sidebar';
@@ -7,16 +8,19 @@ import RulesPage from './components/RulesPage';
 import SettingsPage from './components/SettingsPage';
 import LogsModal from './components/LogsModal';
 import { useVPNState } from './hooks/useVPNState';
-import { useVPNStats } from './hooks/useVPNStat';
 import { useSettingsStorage } from './hooks/useSettingsStorage';
 import { useRulesStorage } from './hooks/useRulesStorage';
 import type { Rule, Log, LogLevel, Config, ParsedConfig } from './types';
 import { useI18n } from './i18n';
 import { isTauri } from './utils/isTauri';
 
+const EMPTY_LOGS: Log[] = [];
+
 function formatTime(date: Date): string {
   return date.toTimeString().split(' ')[0];
 }
+
+const HOME_SNAPSHOT_KEY = 'vpn-home-display-snapshot';
 
 export default function App() {
   const { t } = useI18n();
@@ -44,6 +48,39 @@ export default function App() {
   const [activeConfigContent, setActiveConfigContent] = useState<string | null>(null);
   const [activeConfigFilename, setActiveConfigFilename] = useState<string | null>(null);
   const [parsedConfig, setParsedConfig] = useState<ParsedConfig | null>(null);
+  const [parsedConfigFilename, setParsedConfigFilename] = useState<string | null>(null);
+  const [connectedConfigSnapshot, setConnectedConfigSnapshot] = useState<{
+    proxy_name: string | null;
+    server_address: string | null;
+    mixed_port: number | null;
+  } | null>(null);
+  const [homeDisplaySnapshot, setHomeDisplaySnapshot] = useState<{
+    proxyName: string;
+    serverName: string;
+    port: number;
+  } | null>(null);
+
+  useEffect(() => {
+    const saved = localStorage.getItem(HOME_SNAPSHOT_KEY);
+    if (!saved) return;
+    try {
+      const parsed = JSON.parse(saved) as { proxyName?: unknown; serverName?: unknown; port?: unknown };
+      if (typeof parsed?.proxyName === 'string' && typeof parsed?.serverName === 'string' && typeof parsed?.port === 'number') {
+        setHomeDisplaySnapshot({ proxyName: parsed.proxyName, serverName: parsed.serverName, port: parsed.port });
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!homeDisplaySnapshot) return;
+    try {
+      localStorage.setItem(HOME_SNAPSHOT_KEY, JSON.stringify(homeDisplaySnapshot));
+    } catch {
+      // ignore
+    }
+  }, [homeDisplaySnapshot]);
   
   // Logging function
   const addLog = useCallback((level: LogLevel, message: string) => {
@@ -96,6 +133,22 @@ export default function App() {
 
   const noConfigs = configsLoaded && configs.length === 0;
 
+  const wrappedSetActiveConfigId = useCallback<Dispatch<SetStateAction<string>>>(
+    (value) => {
+      const nextId = typeof value === 'function' ? value(activeConfigId) : value;
+
+      initialLoadDone.current = false;
+      setConfigRulesLoaded(null);
+      setRules([]);
+      setActiveConfigContent(null);
+      setParsedConfig(null);
+      setParsedConfigFilename(null);
+
+      setActiveConfigId(nextId);
+    },
+    [activeConfigId]
+  );
+
   useEffect(() => {
     if (!noConfigs) return;
     if (activePage !== 'settings') {
@@ -112,15 +165,25 @@ export default function App() {
   // Loading active config content
   useEffect(() => {
     if (!activeConfigId || !isTauri() || !activeConfigFilename) return;
+    let cancelled = false;
+    const expectedConfigId = activeConfigId;
+    const expectedFilename = activeConfigFilename;
     
     const loadContent = async () => {
       try {
         const { invoke } = await import('@tauri-apps/api/core');
-        const content = await invoke<string>('read_config', { filename: activeConfigFilename });
+        const content = await invoke<string>('read_config', { filename: expectedFilename });
+        if (cancelled) return;
+        if (expectedConfigId !== activeConfigId || expectedFilename !== activeConfigFilename) return;
+
         setActiveConfigContent(content);
         
         const parsed = await invoke<ParsedConfig>('parse_config', { configContent: content });
+        if (cancelled) return;
+        if (expectedConfigId !== activeConfigId || expectedFilename !== activeConfigFilename) return;
+
         setParsedConfig(parsed);
+        setParsedConfigFilename(expectedFilename);
         
         localStorage.setItem('vpn-active-config', activeConfigId);
       } catch (e) {
@@ -129,6 +192,9 @@ export default function App() {
     };
     
     loadContent();
+    return () => {
+      cancelled = true;
+    };
   }, [activeConfigId, activeConfigFilename]);
 
   const {
@@ -140,9 +206,55 @@ export default function App() {
     stopVPN,
   } = useVPNState();
 
+  useEffect(() => {
+    if (!vpnEnabled) return;
+    if (connectedConfigSnapshot) return;
+    if (!parsedConfig || !activeConfigFilename || parsedConfigFilename !== activeConfigFilename) return;
 
-  // Global VPN statistics
-  const { traffic, latency, formatUptime, formatTraffic } = useVPNStats(vpnEnabled);
+    setConnectedConfigSnapshot({
+      proxy_name: parsedConfig.proxy_name ?? null,
+      server_address: parsedConfig.server_address ?? null,
+      mixed_port: typeof parsedConfig.mixed_port === 'number' ? parsedConfig.mixed_port : null,
+    });
+  }, [vpnEnabled, connectedConfigSnapshot, parsedConfig, parsedConfigFilename, activeConfigFilename]);
+
+  useEffect(() => {
+    // Keep last-known display values for Home, so UI doesn't degrade to "Unknown" when
+    // vpnStatus fields are temporarily null and doesn't jump to newly selected config
+    // while VPN is still running on the previous one.
+    setHomeDisplaySnapshot(prev => {
+      const prevProxy = prev?.proxyName;
+      const prevServer = prev?.serverName;
+      const prevPort = prev?.port;
+
+      if (vpnEnabled) {
+        const proxyName = vpnStatus?.proxy_name || connectedConfigSnapshot?.proxy_name || prevProxy;
+        const serverName = vpnStatus?.server || connectedConfigSnapshot?.server_address || prevServer;
+        const port = vpnStatus?.port || connectedConfigSnapshot?.mixed_port || prevPort;
+        if (!proxyName && !serverName && !port) return prev;
+        return {
+          proxyName: proxyName || 'Unknown',
+          serverName: serverName || 'Not configured',
+          port: port || 7890,
+        };
+      }
+
+      const proxyName = parsedConfig?.proxy_name || prevProxy;
+      const serverName = parsedConfig?.server_address || prevServer;
+      const port = parsedConfig?.mixed_port || prevPort;
+      if (!proxyName && !serverName && !port) return prev;
+      return {
+        proxyName: proxyName || 'Unknown',
+        serverName: serverName || 'Not configured',
+        port: port || 7890,
+      };
+    });
+  }, [vpnEnabled, vpnStatus, connectedConfigSnapshot, parsedConfig]);
+
+  const activeConfigName = useMemo(() => {
+    const c = configs.find(x => x.id === activeConfigId);
+    return c?.name || c?.filename || null;
+  }, [configs, activeConfigId]);
 
   const restartVPN = useCallback(async (rulesOverride?: Rule[]) => {
     // Coalesce rapid changes: keep only the latest rules snapshot.
@@ -237,11 +349,21 @@ export default function App() {
     run();
   }, [settings.closeBehavior]);
 
-  useRulesStorage(rules, setRules);
+  useRulesStorage(activeConfigId, rules, setRules);
+
+  useEffect(() => {
+    initialLoadDone.current = false;
+    setConfigRulesLoaded(null);
+    setRules([]);
+    setActiveConfigContent(null);
+    setParsedConfig(null);
+    setParsedConfigFilename(null);
+  }, [activeConfigId]);
 
   // Loading rules from config
   useEffect(() => {
     if (!parsedConfig || !activeConfigId) return;
+    if (!activeConfigFilename || parsedConfigFilename !== activeConfigFilename) return;
     if (configRulesLoaded === activeConfigId) return;
     
     const configRules: Rule[] = parsedConfig.rules.map((r, idx) => ({
@@ -254,19 +376,13 @@ export default function App() {
         ? r.rule_type 
         : 'domain',
     }));
-    
-    if (configRules.length > 0) {
-      setRules(prev => {
-        const existingKeys = new Set(prev.map(r => `${r.ruleType}:${r.app.toLowerCase()}`));
-        const newRules = configRules.filter(r => !existingKeys.has(`${r.ruleType}:${r.app.toLowerCase()}`));
-        return [...prev, ...newRules];
-      });
-    }
+
+    setRules(configRules);
     setConfigRulesLoaded(activeConfigId);
     setTimeout(() => {
       initialLoadDone.current = true;
     }, 100);
-  }, [parsedConfig, activeConfigId, configRulesLoaded]);
+  }, [parsedConfig, parsedConfigFilename, activeConfigId, activeConfigFilename, configRulesLoaded]);
 
   // Auto-saving rules to config
   useEffect(() => {
@@ -303,6 +419,7 @@ export default function App() {
         return;
       }
       await stopVPN();
+      setConnectedConfigSnapshot(null);
     } else {
       if (!activeConfigContent || !activeConfigFilename) {
         addLog('ERROR', 'No config selected or invalid config file');
@@ -318,11 +435,17 @@ export default function App() {
           settings.mtu,
           settings.killSwitch
         );
+
+        setConnectedConfigSnapshot({
+          proxy_name: parsedConfig?.proxy_name ?? null,
+          server_address: parsedConfig?.server_address ?? null,
+          mixed_port: typeof parsedConfig?.mixed_port === 'number' ? parsedConfig.mixed_port : null,
+        });
       } catch (error) {
         addLog('ERROR', `Failed to start VPN: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
-  }, [vpnEnabled, activeConfigContent, activeConfigFilename, rules, settings.logLevel, settings.enableTun, settings.mtu, settings.killSwitch, startVPN, stopVPN, addLog]);
+  }, [vpnEnabled, activeConfigContent, activeConfigFilename, rules, settings.killSwitch, settings.logLevel, settings.enableTun, settings.mtu, startVPN, stopVPN, addLog, parsedConfig]);
 
   useEffect(() => {
     return () => {
@@ -375,6 +498,10 @@ export default function App() {
     }
   }, [vpnError, addLog]);
 
+  const handleToggleSidebar = useCallback(() => {
+    setSidebarOpen(v => !v);
+  }, []);
+
   useEffect(() => {
     document.documentElement.classList.add('dark');
   }, []);
@@ -406,24 +533,9 @@ export default function App() {
       setSidebarOpen(false);
     }
   }, [isNarrowLayout, noConfigs]);
+
   const pageContent = useMemo(() => {
     switch (activePage) {
-      case 'home':
-        return (
-          <HomePage 
-            vpnEnabled={vpnEnabled} 
-            vpnStatus={vpnStatus}
-            parsedConfig={parsedConfig}
-            isConnecting={isConnecting}
-            error={vpnError}
-            toggleVPN={handleToggleVPN} 
-            hasConfig={!!activeConfigContent}
-            uptime={formatUptime()}
-            traffic={{ up: formatTraffic(traffic.up), down: formatTraffic(traffic.down) }}
-            latency={latency}
-            restartVPN={restartVPN}
-          />
-        );
       case 'rules':
         return (
           <RulesPage 
@@ -441,11 +553,13 @@ export default function App() {
             configs={configs}
             setConfigs={setConfigs}
             activeConfigId={activeConfigId}
-            setActiveConfigId={setActiveConfigId}
+            setActiveConfigId={wrappedSetActiveConfigId}
             setActiveConfigContent={setActiveConfigContent}
             setParsedConfig={setParsedConfig}
             vpnEnabled={vpnEnabled}
             restartVPN={restartVPN}
+            settings={settings}
+            setSettings={setSettings}
           />
         );
       default:
@@ -454,22 +568,18 @@ export default function App() {
   }, [
     activePage,
     vpnEnabled,
-    vpnStatus,
-    parsedConfig,
-    isConnecting,
-    vpnError,
-    handleToggleVPN,
-    activeConfigContent,
     activeConfigFilename,
     configs,
     activeConfigId,
     rules,
     setRules,
     restartVPN,
-    traffic,
-    latency,
-    formatUptime,
-    formatTraffic,
+    setConfigs,
+    setSettings,
+    settings,
+    setShowLogsModal,
+    vpnEnabled,
+    wrappedSetActiveConfigId,
   ]);
 
   return (
@@ -516,7 +626,7 @@ export default function App() {
       <Titlebar
         showSidebarToggle={isNarrowLayout}
         sidebarOpen={sidebarOpen}
-        onToggleSidebar={() => setSidebarOpen(v => !v)}
+        onToggleSidebar={handleToggleSidebar}
         closeBehavior={settings.closeBehavior}
       />
       {isNarrowLayout && sidebarOpen && (
@@ -535,12 +645,29 @@ export default function App() {
           hasConfig={!!activeConfigContent}
           className={isNarrowLayout ? `sidebar-floating ${sidebarOpen ? 'sidebar-open' : ''}` : ''}
         />
-        <main className="app-main">{pageContent}</main>
+        <main className="app-main">
+          <div hidden={activePage !== 'home'}>
+            <HomePage 
+              vpnEnabled={vpnEnabled} 
+              vpnStatus={vpnStatus}
+              parsedConfig={parsedConfig}
+              connectedConfigSnapshot={connectedConfigSnapshot}
+              homeDisplaySnapshot={homeDisplaySnapshot}
+              activeConfigName={activeConfigName}
+              pollingEnabled={activePage === 'home'}
+              isConnecting={isConnecting}
+              error={vpnError}
+              toggleVPN={handleToggleVPN} 
+              hasConfig={!!activeConfigContent}
+            />
+          </div>
+          {activePage !== 'home' ? pageContent : null}
+        </main>
       </div>
       <LogsModal 
         showLogsModal={showLogsModal} 
         setShowLogsModal={setShowLogsModal} 
-        logs={logs} 
+        logs={showLogsModal ? logs : EMPTY_LOGS} 
         setLogs={setLogs}
         settings={settings} 
         setSettings={setSettings} 

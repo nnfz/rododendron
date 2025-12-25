@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { LuPower, LuShield, LuSettings, LuRefreshCcw } from 'react-icons/lu';
 import { useI18n } from '../i18n';
 import type { TabType } from '../types';
@@ -11,7 +12,7 @@ interface SidebarProps {
   className?: string;
 }
 
-export default function Sidebar({ activeTab, setActiveTab, vpnEnabled, restartVPN, hasConfig, className }: SidebarProps) {
+function Sidebar({ activeTab, setActiveTab, vpnEnabled, restartVPN, hasConfig, className }: SidebarProps) {
   const { t } = useI18n();
 
   const handleRestart = () => {
@@ -75,3 +76,5 @@ export default function Sidebar({ activeTab, setActiveTab, vpnEnabled, restartVP
     </div>
   );
 }
+
+export default memo(Sidebar);

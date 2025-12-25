@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { memo, useState, useRef, useEffect, useCallback } from 'react';
 import { LuChevronDown } from 'react-icons/lu';
 import { useI18n } from '../i18n';
 
@@ -16,7 +16,7 @@ interface CustomSelectProps {
   disabled?: boolean;
 }
 
-export default function CustomSelect({ value, onChange, options, className = '', style, disabled = false }: CustomSelectProps) {
+function CustomSelect({ value, onChange, options, className = '', style, disabled = false }: CustomSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const { t } = useI18n();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -89,3 +89,5 @@ export default function CustomSelect({ value, onChange, options, className = '',
     </div>
   );
 }
+
+export default memo(CustomSelect);

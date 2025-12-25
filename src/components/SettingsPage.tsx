@@ -1,6 +1,5 @@
 import React, { useRef, useCallback, useState } from 'react';
 import { LuChevronRight, LuDownload, LuFileText, LuHelpCircle, LuRefreshCw, LuUpload, LuTrash2 } from 'react-icons/lu';
-import { useSettingsStorage } from '../hooks/useSettingsStorage';
 import CustomSelect from './CustomSelect';
 import { useI18n } from '../i18n';
 import type { Language } from '../i18n/translations';
@@ -18,6 +17,8 @@ interface SettingsPageProps {
   setParsedConfig: Dispatch<SetStateAction<ParsedConfig | null>>;
   vpnEnabled: boolean;
   restartVPN: (rulesOverride?: any[]) => Promise<void>;
+  settings: Settings;
+  setSettings: Dispatch<SetStateAction<Settings>>;
 }
 
 type UpdateCheckResult = {
@@ -29,16 +30,17 @@ type UpdateCheckResult = {
   release_notes?: string | null;
 };
 
-export default function SettingsPage({ 
+function SettingsPage({ 
   setShowLogsModal,
   configs,
   setConfigs,
   activeConfigId,
   setActiveConfigId,
+  settings,
+  setSettings,
   vpnEnabled,
   restartVPN,
 }: SettingsPageProps) {
-  const [settings, setSettings] = useSettingsStorage();
   const { t, language, setLanguage } = useI18n();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -262,10 +264,10 @@ export default function SettingsPage({
               </button>
               <button 
                 onClick={() => fileInputRef.current?.click()} 
-                className="config-action-btn"
+                className="config-action-btn config-import-btn"
               >
                 <LuUpload size={18} />
-                <span className="setting-label">{t.settings.importConfig}</span>
+                <span className="setting-label import-label">{t.settings.importConfig}</span>
               </button>
               <button 
                 onClick={handleExportConfig} 
@@ -463,3 +465,5 @@ export default function SettingsPage({
     </div>
   );
 }
+
+export default React.memo(SettingsPage);

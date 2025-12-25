@@ -1,4 +1,4 @@
-import { useCallback, useState, useEffect, useMemo, useRef } from 'react';
+import { memo, useCallback, useState, useEffect, useMemo, useRef } from 'react';
 import { LuDownload, LuX, LuLoader2, LuTrash2} from 'react-icons/lu';
 import { useI18n } from '../i18n';
 import CustomSelect from './CustomSelect';
@@ -36,7 +36,7 @@ interface MihomoLog {
   message: string;
 }
 
-export default function LogsModal({ 
+function LogsModal({ 
   showLogsModal, 
   setShowLogsModal, 
   logs, 
@@ -210,9 +210,15 @@ export default function LogsModal({
           filters: [{ name: 'Text Files', extensions: ['txt', 'log'] }],
         });
 
-        if (filePath) {
-          await writeTextFile(filePath, logText);
-        }
+        if (!filePath) return;
+
+        await writeTextFile(
+          filePath,
+          logText,
+          {
+            baseDir: undefined,
+          }
+        );
       } catch (err) {
         console.error('Failed to export logs:', err);
       } finally {
@@ -284,3 +290,5 @@ export default function LogsModal({
     </div>
   );
 }
+
+export default memo(LogsModal);

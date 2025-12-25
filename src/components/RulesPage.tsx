@@ -1,4 +1,4 @@
-import { useState, useCallback, type Dispatch, type SetStateAction } from 'react';
+import { memo, useState, useCallback, type Dispatch, type SetStateAction } from 'react';
 import { LuPlus, LuTrash2, LuSearch, LuMonitor, LuGlobe, LuHash, LuX, LuHelpCircle } from 'react-icons/lu';
 import { useI18n } from '../i18n';
 import type { Rule } from '../types';
@@ -15,7 +15,7 @@ interface RulesPageProps {
 
 type RuleType = 'process' | 'domain' | 'domain_keyword';
 
-export default function RulesPage({ rules, setRules, vpnEnabled, restartVPN }: RulesPageProps) {
+function RulesPage({ rules, setRules, vpnEnabled, restartVPN }: RulesPageProps) {
   const { t } = useI18n();
   const [newRuleApp, setNewRuleApp] = useState('');
   const [newRuleType, setNewRuleType] = useState<RuleType>('process');
@@ -192,7 +192,6 @@ export default function RulesPage({ rules, setRules, vpnEnabled, restartVPN }: R
   const filteredRules = rules.filter(rule =>
     rule.app.toLowerCase().includes(searchQuery.toLowerCase())
   );
-
   const filteredProcesses = processes.filter(proc =>
     proc.name.toLowerCase().includes(processSearchQuery.toLowerCase())
   );
@@ -461,3 +460,5 @@ export default function RulesPage({ rules, setRules, vpnEnabled, restartVPN }: R
     </div>
   );
 }
+
+export default memo(RulesPage);

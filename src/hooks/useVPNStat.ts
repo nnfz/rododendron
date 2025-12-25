@@ -7,7 +7,7 @@ interface TrafficStats {
   down: number;
 }
 
-export function useVPNStats(vpnEnabled: boolean) {
+export function useVPNStats(vpnEnabled: boolean, pollingEnabled: boolean = true) {
 
   const [uptime, setUptime] = useState({ hours: 0, minutes: 0, seconds: 0 });
   const [traffic, setTraffic] = useState<TrafficStats>({ up: 0, down: 0 });
@@ -28,10 +28,19 @@ export function useVPNStats(vpnEnabled: boolean) {
       setUptime({ hours: 0, minutes: 0, seconds: 0 });
       setTraffic({ up: 0, down: 0 });
       setLatency(null);
+
       startTimeRef.current = null;
       lastTrafficSampleRef.current = null;
       lastConnTotalsRef.current = null;
       stopRef.current = false;
+      if (uptimeIntervalRef.current) {
+        clearInterval(uptimeIntervalRef.current);
+        uptimeIntervalRef.current = null;
+      }
+      return;
+    }
+
+    if (!pollingEnabled) {
       if (uptimeIntervalRef.current) {
         clearInterval(uptimeIntervalRef.current);
         uptimeIntervalRef.current = null;
@@ -59,11 +68,11 @@ export function useVPNStats(vpnEnabled: boolean) {
         uptimeIntervalRef.current = null;
       }
     };
-  }, [vpnEnabled]);
+  }, [vpnEnabled, pollingEnabled]);
 
   // Fetch stats from mihomo API
   useEffect(() => {
-    if (!vpnEnabled || !isTauri()) {
+    if (!vpnEnabled || !isTauri() || !pollingEnabled) {
       if (statsIntervalRef.current) {
         clearInterval(statsIntervalRef.current);
         statsIntervalRef.current = null;
@@ -249,7 +258,7 @@ export function useVPNStats(vpnEnabled: boolean) {
       clearInterval(delayInterval);
       statsIntervalRef.current = null;
     };
-  }, [vpnEnabled]);
+  }, [vpnEnabled, pollingEnabled]);
 
   const formatUptime = () => {
     const pad = (n: number) => String(n).padStart(2, '0');

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useState } from 'react';
 import { LuMenu, LuMinus, LuSquare, LuX } from 'react-icons/lu';
 import { useI18n } from '../i18n';
 import { isTauri } from '../utils/isTauri';
@@ -10,7 +10,7 @@ interface TitlebarProps {
   closeBehavior?: 'tray' | 'exit';
 }
 
-export default function Titlebar({ showSidebarToggle, sidebarOpen, onToggleSidebar, closeBehavior = 'tray' }: TitlebarProps) {
+function Titlebar({ showSidebarToggle, sidebarOpen, onToggleSidebar, closeBehavior = 'tray' }: TitlebarProps) {
   const { t } = useI18n();
   const [appWindow, setAppWindow] = useState<Awaited<ReturnType<typeof import('@tauri-apps/api/window').getCurrentWindow>> | null>(null);
 
@@ -70,3 +70,5 @@ export default function Titlebar({ showSidebarToggle, sidebarOpen, onToggleSideb
     </div>
   );
 }
+
+export default memo(Titlebar);

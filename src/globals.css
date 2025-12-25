@@ -6,7 +6,7 @@
   --muted: #6b7280;
   --border: rgba(55, 55, 60, 0.6);
   --surface: rgba(20, 20, 20, 0.6);
-  --accent: #2f96ff;
+  --accent: rgb(47, 150, 255);
   --red: #ef4444;
   --orange: #ef9744;
   --accent-dim: rgba(47, 150, 255, 0.15);
@@ -1538,6 +1538,16 @@ select.input option {
 .config-delete-btn:hover:not(:disabled), .config-delete-btn:hover:not(:disabled) .delete-label {
   color: rgb(239, 68, 68);
   background-color: rgba(239, 68, 68, .1);
+  transition: 0.2s ease;
+}
+
+.config-import-btn {
+  transition: 0.2s ease;
+}
+
+.config-import-btn:hover, .config-import-btn:hover .import-label {
+  color: var(--accent);
+  background-color: rgba(47, 150, 255, .1) !important;
   transition: 0.2s ease;
 }
 
