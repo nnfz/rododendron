@@ -58,9 +58,9 @@ fn has_admin_privileges() -> bool {
     nix::unistd::geteuid().is_root()
 }
 
-pub fn is_elevated() -> bool {
-    has_admin_privileges()
-}
+// pub fn is_elevated() -> bool {
+//     has_admin_privileges()
+// }
 
 // Проверка существующих процессов mihomo
 #[cfg(target_os = "windows")]

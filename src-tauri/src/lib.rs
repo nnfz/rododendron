@@ -1,6 +1,7 @@
 mod process_scanner;
 mod mihomo;
 mod autostart;
+mod updater;
 
 use process_scanner::get_running_processes;
 use mihomo::{
@@ -12,6 +13,8 @@ use mihomo::{
 };
 
 use autostart::set_autostart;
+
+use updater::{check_for_updates, install_update};
 
 use tauri::Manager;
 use tauri::{menu::{Menu, MenuItemBuilder}, tray::TrayIconBuilder};
@@ -94,6 +97,8 @@ pub fn run() {
             mihomo_get_proxies,
             mihomo_get_connections,
             mihomo_get_delay,
+            check_for_updates,
+            install_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

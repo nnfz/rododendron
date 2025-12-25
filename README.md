@@ -1,4 +1,9 @@
-# Rododendron
+
+<h1 align="center">
+  <img src=".github/assets/logodendron.png" alt="Meta Kennel" width="200">
+  <br>Rododendron<br>
+</h1>
+
 ### A lightweight desktop VPN client: minimal clutter, maximum usefulness.
 > Currently in beta
 
@@ -34,5 +39,4 @@ This project is licensed under the [MIT License](./LICENSE).
 
 ## Credits
 - Based on **Mihomo (Clash.Meta)** — thanks to the author of the original project.
-  - ### [Repository](https://github.com/MetaCubeX/mihomo)
-  - ### [License](https://github.com/MetaCubeX/mihomo/blob/main/LICENSE)
+  - ### [MetaCubeX/mihomo](https://github.com/MetaCubeX/mihomo)

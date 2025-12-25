@@ -1,5 +1,5 @@
 import React, { useRef, useCallback, useState } from 'react';
-import { LuChevronRight, LuFileText, LuHelpCircle, LuUpload, LuTrash2 } from 'react-icons/lu';
+import { LuChevronRight, LuDownload, LuFileText, LuHelpCircle, LuRefreshCw, LuUpload, LuTrash2 } from 'react-icons/lu';
 import { useSettingsStorage } from '../hooks/useSettingsStorage';
 import CustomSelect from './CustomSelect';
 import { useI18n } from '../i18n';
@@ -20,6 +20,15 @@ interface SettingsPageProps {
   restartVPN: (rulesOverride?: any[]) => Promise<void>;
 }
 
+type UpdateCheckResult = {
+  current_version: string;
+  latest_version: string;
+  update_available: boolean;
+  asset_name?: string | null;
+  download_url?: string | null;
+  release_notes?: string | null;
+};
+
 export default function SettingsPage({ 
   setShowLogsModal,
   configs,
@@ -34,6 +43,11 @@ export default function SettingsPage({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [mtuError, setMtuError] = useState(false);
+
+  const [updateCheck, setUpdateCheck] = useState<UpdateCheckResult | null>(null);
+  const [updateStatusText, setUpdateStatusText] = useState<string | null>(null);
+  const [isCheckingUpdates, setIsCheckingUpdates] = useState(false);
+  const [isInstallingUpdate, setIsInstallingUpdate] = useState(false);
 
   const toggleSetting = useCallback(async (key: keyof Settings) => {
     try {
@@ -60,6 +74,61 @@ export default function SettingsPage({
       setSettings(prev => ({ ...prev, [key]: prev[key] }));
     }
   }, [setSettings, vpnEnabled, restartVPN]);
+
+  const handleCheckUpdates = useCallback(async () => {
+    if (!isTauri()) {
+      setUpdateStatusText(t.settings.updateError);
+      return;
+    }
+
+    setIsCheckingUpdates(true);
+    setIsInstallingUpdate(false);
+    setUpdateStatusText(t.settings.checkingUpdates);
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const res = await invoke('check_for_updates') as UpdateCheckResult;
+      setUpdateCheck(res);
+
+      if (!res?.update_available) {
+        setUpdateStatusText(t.settings.upToDate);
+        return;
+      }
+
+      if (!res?.asset_name) {
+        setUpdateStatusText(`${t.settings.updateError}: no .exe`);
+        return;
+      }
+
+      setUpdateStatusText(`${t.settings.updateAvailable}: v${res.latest_version}`);
+    } catch (e) {
+      console.error('Failed to check updates:', e);
+      setUpdateStatusText(t.settings.updateError);
+    } finally {
+      setIsCheckingUpdates(false);
+    }
+  }, [t.settings.checkingUpdates, t.settings.upToDate, t.settings.updateAvailable, t.settings.updateError]);
+
+  const handleInstallUpdate = useCallback(async () => {
+    if (!isTauri()) {
+      setUpdateStatusText(t.settings.updateError);
+      return;
+    }
+
+    if (!updateCheck?.update_available) {
+      return;
+    }
+
+    setIsInstallingUpdate(true);
+    setUpdateStatusText(t.settings.installingUpdate);
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('install_update');
+    } catch (e) {
+      console.error('Failed to install update:', e);
+      setUpdateStatusText(t.settings.updateError);
+      setIsInstallingUpdate(false);
+    }
+  }, [t.settings.installingUpdate, t.settings.updateError, updateCheck?.update_available]);
 
   const handleMtuChange = useCallback(async (value: string) => {
     const numValue = parseInt(value, 10);
@@ -105,6 +174,31 @@ export default function SettingsPage({
     
     if (fileInputRef.current) fileInputRef.current.value = '';
   }, [setConfigs, setActiveConfigId]);
+
+  const handleExportConfig = useCallback(async () => {
+    if (!activeConfigId || !isTauri()) return;
+
+    const config = configs.find(c => c.id === activeConfigId);
+    if (!config?.filename) return;
+
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const { save } = await import('@tauri-apps/plugin-dialog');
+      const { writeTextFile } = await import('@tauri-apps/plugin-fs');
+
+      const content = await invoke<string>('read_config', { filename: config.filename });
+
+      const filePath = await save({
+        defaultPath: config.filename,
+        filters: [{ name: 'YAML', extensions: ['yaml', 'yml'] }],
+      });
+
+      if (!filePath) return;
+      await writeTextFile(filePath, content);
+    } catch (e) {
+      console.error('Failed to export config:', e);
+    }
+  }, [activeConfigId, configs]);
 
   const handleDeleteConfig = useCallback(async () => {
     if (!activeConfigId || !isTauri()) return;
@@ -175,6 +269,14 @@ export default function SettingsPage({
               >
                 <LuUpload size={18} />
                 <span className="setting-label">{t.settings.importConfig}</span>
+              </button>
+              <button 
+                onClick={handleExportConfig} 
+                className="config-action-btn"
+                disabled={!activeConfigId}
+              >
+                <LuDownload size={18} />
+                <span className="setting-label">{t.settings.exportConfig}</span>
               </button>
             </div>
             <input 
@@ -316,6 +418,35 @@ export default function SettingsPage({
               <span className="setting-label">{t.settings.versioncore}</span>
               <span className="setting-value">mihomo</span>
             </div>
+
+            <div className="config-actions">
+              <button
+                onClick={handleCheckUpdates}
+                className="config-action-btn"
+                disabled={isCheckingUpdates || isInstallingUpdate}
+              >
+                <LuRefreshCw size={18} />
+                <span className="setting-label">{t.settings.checkUpdates}</span>
+              </button>
+
+              {updateCheck?.update_available ? (
+                <button
+                  onClick={handleInstallUpdate}
+                  className="config-action-btn"
+                  disabled={isCheckingUpdates || isInstallingUpdate}
+                >
+                  <LuDownload size={18} />
+                  <span className="setting-label">{t.settings.updateNow}</span>
+                </button>
+              ) : null}
+            </div>
+
+            {updateStatusText ? (
+              <div className="panel-row disabled">
+                <span className="setting-label">{updateStatusText}</span>
+                <span className="setting-value"></span>
+              </div>
+            ) : null}
           </div>
         </div>
       </div>

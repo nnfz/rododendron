@@ -25,6 +25,7 @@ export type Translations = {
     title: string;
     addRule: string;
     exportToConfig: string;
+    exportToConfigHelp: string;
     process: string;
     domain: string;
     domainkey: string;
@@ -63,6 +64,7 @@ export type Translations = {
     interfaceLanguage: string;
     logsAndDiagnostics: string;
     importConfig: string;
+    exportConfig: string;
     deleteConfig: string;
     snowfall: string;
     logs: string;
@@ -77,6 +79,13 @@ export type Translations = {
     logLevel: string;
     mtu: string;
     mtuHelp: string;
+    checkUpdates: string;
+    checkingUpdates: string;
+    updateAvailable: string;
+    upToDate: string;
+    updateNow: string;
+    installingUpdate: string;
+    updateError: string;
     about: string;
     version: string;
     confirmDelete: string;
@@ -127,6 +136,7 @@ export const translations: Record<Language, Translations> = {
       title: 'Routing Rules',
       addRule: 'Add Rule',
       exportToConfig: 'Save rules to config',
+      exportToConfigHelp: 'Saves your current rules into a YAML config file you choose.',
       process: 'Process',
       domain: 'Domain',
       domainkey: 'Keyword',
@@ -166,6 +176,7 @@ export const translations: Record<Language, Translations> = {
       logsAndDiagnostics: 'Logs and diagnostics',
       logs: 'Logs',
       importConfig: 'Import configuration',
+      exportConfig: 'Export configuration',
       deleteConfig: 'Delete configuration',
       mainSettings: 'Main Settings',
       autoConnect: 'Auto connect',
@@ -180,6 +191,13 @@ export const translations: Record<Language, Translations> = {
       enableTun: 'Enable TUN',
       mtu: 'MTU',
       mtuHelp: 'Maximum packet size. Lower it if you have connection issues; 1500 is default.',
+      checkUpdates: 'Check for updates',
+      checkingUpdates: 'Checking...',
+      updateAvailable: 'Update available',
+      upToDate: 'Up to date',
+      updateNow: 'Update',
+      installingUpdate: 'Installing...',
+      updateError: 'Update error',
       about: 'About',
       version: 'Version',
       versioncore: 'Core version',
@@ -227,6 +245,7 @@ export const translations: Record<Language, Translations> = {
       title: 'Правила маршрутизации',
       addRule: 'Добавить правило',
       exportToConfig: 'Сохранить правила в конфиг',
+      exportToConfigHelp: 'Сохраняет текущие правила в YAML-конфиг, который ты выберешь.',
       process: 'Процесс',
       domain: 'Домен',
       type: 'Тип',
@@ -264,6 +283,7 @@ export const translations: Record<Language, Translations> = {
       activeConfig: 'Активный конфиг',
       language: 'Язык',
       importConfig: 'Импорт конфигурации',
+      exportConfig: 'Экспорт конфигурации',
       deleteConfig: 'Удалить конфигурацию',
       interfaceLanguage: 'Язык интерфейса',
       logsAndDiagnostics: 'Логи и диагностика',
@@ -281,6 +301,13 @@ export const translations: Record<Language, Translations> = {
       logLevel: 'Уровень логов',
       mtu: 'MTU',
       mtuHelp: 'Макс. размер пакета. Уменьши, если есть проблемы с подключением; 1500 по умолчанию.',
+      checkUpdates: 'Проверить обновления',
+      checkingUpdates: 'Проверка...',
+      updateAvailable: 'Доступно обновление',
+      upToDate: 'Обновлений нет',
+      updateNow: 'Обновить',
+      installingUpdate: 'Установка...',
+      updateError: 'Ошибка обновления',
       about: 'О программе',
       version: 'Версия',
       versioncore: 'Версия ядра',
@@ -328,6 +355,7 @@ export const translations: Record<Language, Translations> = {
       title: 'Правілы маршрутызацыі',
       addRule: 'Дадаць правіла',
       exportToConfig: 'Захаваць правілы ў канфіг',
+      exportToConfigHelp: 'Захоўвае бягучыя правілы ў YAML-канфіг, які ты выберыш.',
       process: 'Працэс',
       type: 'Тып',
       target: 'Мэта',
@@ -366,6 +394,7 @@ export const translations: Record<Language, Translations> = {
       interfaceLanguage: 'Мова інтэрфейсу',
       logsAndDiagnostics: 'Логі і дыягностыка',
       importConfig: 'Імпарт канфігурацыі',
+      exportConfig: 'Экспарт канфігурацыі',
       deleteConfig: 'Выдаліць канфігурацыю',
       enableTun: 'Уключыць TUN',
       logs: 'Логі',
@@ -381,6 +410,13 @@ export const translations: Record<Language, Translations> = {
       logLevel: 'Узровень логаў',
       mtu: 'MTU',
       mtuHelp: 'Макс. памер пакета. Паменшы, калі ёсць праблемы з падключэннем; 1500 па змаўчанні.',
+      checkUpdates: 'Праверыць абнаўленні',
+      checkingUpdates: 'Праверка...',
+      updateAvailable: 'Даступна абнаўленне',
+      upToDate: 'Абнаўленняў няма',
+      updateNow: 'Абнавіць',
+      installingUpdate: 'Устаноўка...',
+      updateError: 'Памылка абнаўлення',
       about: 'Пра праграму',
       version: 'Версія',
       versioncore: 'Версія ядра',

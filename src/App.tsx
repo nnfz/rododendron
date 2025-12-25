@@ -121,7 +121,7 @@ export default function App() {
 
   // Global VPN statistics
   const proxyName = vpnStatus?.proxy_name || parsedConfig?.proxy_name || 'Unknown';
-  const { uptime, traffic, latency, formatUptime, formatTraffic } = useVPNStats(vpnEnabled, proxyName);
+  const { traffic, latency, formatUptime, formatTraffic } = useVPNStats(vpnEnabled, proxyName);
 
   const restartVPN = useCallback(async (rulesOverride?: Rule[]) => {
     // Coalesce rapid changes: keep only the latest rules snapshot.
@@ -221,8 +221,8 @@ export default function App() {
     
     if (configRules.length > 0) {
       setRules(prev => {
-        const existingApps = new Set(prev.map(r => r.app.toLowerCase()));
-        const newRules = configRules.filter(r => !existingApps.has(r.app.toLowerCase()));
+        const existingKeys = new Set(prev.map(r => `${r.ruleType}:${r.app.toLowerCase()}`));
+        const newRules = configRules.filter(r => !existingKeys.has(`${r.ruleType}:${r.app.toLowerCase()}`));
         return [...prev, ...newRules];
       });
     }
@@ -415,9 +415,24 @@ export default function App() {
         return null;
     }
   }, [
-    activePage, vpnEnabled, vpnStatus, parsedConfig, isConnecting,
-    handleToggleVPN, activeConfigContent, rules, settings, setSettings,
-    vpnError, uptime, traffic, latency, formatUptime, formatTraffic, restartVPN
+    activePage,
+    vpnEnabled,
+    vpnStatus,
+    parsedConfig,
+    isConnecting,
+    vpnError,
+    handleToggleVPN,
+    activeConfigContent,
+    activeConfigFilename,
+    configs,
+    activeConfigId,
+    rules,
+    setRules,
+    restartVPN,
+    traffic,
+    latency,
+    formatUptime,
+    formatTraffic,
   ]);
 
   return (

@@ -1,5 +1,5 @@
 import { useState, useCallback, type Dispatch, type SetStateAction } from 'react';
-import { LuPlus, LuTrash2, LuSearch, LuMonitor, LuGlobe, LuHash, LuX } from 'react-icons/lu';
+import { LuPlus, LuTrash2, LuSearch, LuMonitor, LuGlobe, LuHash, LuX, LuHelpCircle } from 'react-icons/lu';
 import { useI18n } from '../i18n';
 import type { Rule } from '../types';
 import { isTauri } from '../utils/isTauri';
@@ -124,22 +124,55 @@ export default function RulesPage({ rules, setRules, vpnEnabled, restartVPN }: R
   }, [rules, setRules, vpnEnabled, restartVPN]);
 
   const addRule = useCallback(async () => {
-    if (!newRuleApp.trim()) return;
+    const normalizeTarget = (raw: string) => {
+      const t = raw.trim();
+      if (!t) return '';
+      if (newRuleType === 'domain' || newRuleType === 'domain_keyword') {
+        return t.toLowerCase();
+      }
+      return t;
+    };
 
-    if (newRuleType === 'process' && !isValidProcessTarget(newRuleApp)) {
-      triggerNewRuleInputError();
+    const targets = newRuleApp
+      .split(',')
+      .map(normalizeTarget)
+      .filter(Boolean);
+
+    if (targets.length === 0) return;
+
+    if (newRuleType === 'process') {
+      const hasInvalid = targets.some(t => !isValidProcessTarget(t));
+      if (hasInvalid) {
+        triggerNewRuleInputError();
+        return;
+      }
+    }
+
+    const existingKeys = new Set(rules.map(r => `${r.ruleType}:${r.app.toLowerCase()}:${r.rule}`));
+    const seenInInput = new Set<string>();
+
+    const baseId = Date.now();
+    const newRules: Rule[] = [];
+    for (const target of targets) {
+      const key = `${newRuleType}:${target.toLowerCase()}:${newRuleAction}`;
+      if (existingKeys.has(key)) continue;
+      if (seenInInput.has(key)) continue;
+      seenInInput.add(key);
+      newRules.push({
+        id: baseId + newRules.length,
+        app: target,
+        rule: newRuleAction,
+        active: true,
+        ruleType: newRuleType,
+      });
+    }
+
+    if (newRules.length === 0) {
+      setNewRuleInputError(false);
       return;
     }
 
-    const newRule: Rule = {
-      id: Date.now(),
-      app: newRuleApp.trim(),
-      rule: newRuleAction,
-      active: true,
-      ruleType: newRuleType,
-    };
-
-    const nextRules = [...rules, newRule];
+    const nextRules = [...rules, ...newRules];
     setRules(nextRules);
     setNewRuleApp('');
     setNewRuleInputError(false);
@@ -210,9 +243,20 @@ export default function RulesPage({ rules, setRules, vpnEnabled, restartVPN }: R
           <div className="panel">
             <div className="panel-row disabled" style={{ justifyContent: 'space-between' }}>
               <span className="setting-label">{t.rules.title}</span>
-              <button onClick={exportRulesToConfig} className="btn btn-primary-dark">
-                {t.rules.exportToConfig}
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <button onClick={exportRulesToConfig} className="btn btn-primary-dark">
+                  {t.rules.exportToConfig}
+                </button>
+                <button
+                  type="button"
+                  className="help-tooltip"
+                  onClick={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  <LuHelpCircle size={14} className="help-icon" />
+                  <span className="help-tooltip-content">{t.rules.exportToConfigHelp}</span>
+                </button>
+              </div>
             </div>
           </div>
         )}
