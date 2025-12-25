@@ -109,8 +109,7 @@ body {
 .collapsible {
   max-height: 0;
   overflow: hidden;
-  filter: blur(2px);
-  -webkit-filter: blur(2px);
+  filter: blur(6px);
   opacity: 0;
   padding-top: 0;
   padding-bottom: 0;
@@ -121,6 +120,7 @@ body {
   max-height: 420px;
   opacity: 1;
   padding-top: 0.5rem;
+  filter: blur(0px);
   padding-bottom: 0.5rem;
 }
 
@@ -1002,14 +1002,12 @@ select.input option {
 
 .ip{
   filter: blur(8px);
-  -webkit-filter: blur(8px);
   clip-path: fill-box;
   transition: .1s ease;
 }
 
 .ip:hover{
   filter: blur(0px);  
-  -webkit-filter: blur(0px);
 }
 
 .meta-row {
@@ -1040,7 +1038,6 @@ select.input option {
   height: 0.5rem;
   background: transparent;
   filter: blur(8px);
-  -webkit-filter: blur(8px);
   border-radius: 9999px;
   display: inline-block;
   transition: 0.3s ease;
@@ -1051,7 +1048,6 @@ select.input option {
 
 .status-dot.active {
   filter: blur(0px);
-  -webkit-filter: blur(0px);
   background: var(--accent);
 }
 
