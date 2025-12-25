@@ -8,7 +8,7 @@ use mihomo::{
     parse_config, generate_config, import_config,
     start_vpn, stop_vpn, get_vpn_status,
     list_configs, read_config, delete_config,
-    save_rules_to_config, save_rules_to_path, resolve_config_path, get_mihomo_logs,
+    save_rules_to_config, save_rules_to_path, resolve_config_path, get_mihomo_logs, clear_mihomo_logs,
     mihomo_get_traffic, mihomo_get_proxies, mihomo_get_connections, mihomo_get_delay, ping_host,
 };
 
@@ -129,6 +129,7 @@ pub fn run() {
             read_config,
             delete_config,
             get_mihomo_logs,
+            clear_mihomo_logs,
             save_rules_to_config,
             save_rules_to_path,
             resolve_config_path,

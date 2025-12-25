@@ -97,6 +97,7 @@ export type Translations = {
   logs: {
     title: string;
     export: string;
+    clear: string;
   };
   common: {
     save: string;
@@ -211,6 +212,7 @@ export const translations: Record<Language, Translations> = {
     logs: {
       title: 'Application Logs',
       export: 'Export',
+      clear: 'Clear',
     },
     common: {
       save: 'Save',
@@ -324,6 +326,7 @@ export const translations: Record<Language, Translations> = {
     logs: {
       title: 'Логи приложения',
       export: 'Экспорт',
+      clear: 'Очистить',
     },
     common: {
       save: 'Сохранить',
@@ -436,6 +439,7 @@ export const translations: Record<Language, Translations> = {
     logs: {
       title: 'Логі праграмы',
       export: 'Экспарт',
+      clear: 'Очистіць',
     },
     common: {
       save: 'Захаваць',

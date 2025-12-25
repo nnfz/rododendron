@@ -1,6 +1,6 @@
 [package]
 name = "rododendron"
-version = "0.2.2"
+version = "0.2.5"
 description = "Simple VPN client"
 authors = ["nnfz", "bstvr"]
 edition = "2024"

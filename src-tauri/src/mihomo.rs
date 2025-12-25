@@ -600,18 +600,38 @@ pub fn generate_config(
 
     yaml["log-level"] = serde_yaml::Value::String(log_level.to_lowercase());
 
+    yaml["allow-lan"] = serde_yaml::Value::Bool(false);
+
+    yaml["unified-delay"] = serde_yaml::Value::Bool(true);
+
+    yaml["ipv6"] = serde_yaml::Value::Bool(true);
+
     let has_controller = yaml
         .get("external-controller")
         .and_then(|v| v.as_str())
-        .map(|s| !s.trim().is_empty())
+        .map(|s| !s.trim().is_empty()) 
         .unwrap_or(false);
     if !has_controller {
         yaml["external-controller"] = serde_yaml::Value::String("127.0.0.1:9090".to_string());
     }
 
-    // IMPORTANT:
-    // If frontend sends no rules (e.g. during startup before rules are loaded),
-    // do not wipe existing config rules. Only override rules when user_rules is non-empty.
+    let mut dns = serde_yaml::Mapping::new();
+    dns.insert("enable".into(), serde_yaml::Value::Bool(true));
+    dns.insert("ipv6".into(), serde_yaml::Value::Bool(true));
+    dns.insert(
+        "enhanced-mode".into(),
+        serde_yaml::Value::String("fake-ip".to_string()),
+    );
+    dns.insert(
+        "fake-ip-range".into(),
+        serde_yaml::Value::String("198.18.0.1/16".to_string()),
+    );
+    yaml["dns"] = serde_yaml::Value::Mapping(dns);
+
+    let mut profile = serde_yaml::Mapping::new();
+    profile.insert("store-selected".into(), serde_yaml::Value::Bool(true));
+    yaml["profile"] = serde_yaml::Value::Mapping(profile);
+    
     if !user_rules.is_empty() {
         let mut rules = Vec::new();
         let has_active_rules = user_rules.iter().any(|r| r.active);
@@ -637,13 +657,26 @@ pub fn generate_config(
     }
 
     // Keep existing tun config if present, only toggle enable + optional MTU.
-    if !yaml.get("tun").is_some() {
-        yaml["tun"] = serde_yaml::Value::Mapping(serde_yaml::Mapping::new());
-    }
-    yaml["tun"]["enable"] = serde_yaml::Value::Bool(enable_tun);
+    let mut tun = serde_yaml::Mapping::new();
+    tun.insert("enable".into(), serde_yaml::Value::Bool(enable_tun));
     if let Some(mtu) = mtu {
-        yaml["tun"]["mtu"] = serde_yaml::Value::Number(serde_yaml::Number::from(mtu));
+        tun.insert(
+            "mtu".into(),
+            serde_yaml::Value::Number(serde_yaml::Number::from(mtu)),
+        );
     }
+    tun.insert(
+        "auto-detect-interface".into(),
+        serde_yaml::Value::Bool(true),
+    );
+    tun.insert("stack".into(), serde_yaml::Value::String("gvisor".to_string()));
+    tun.insert("auto-route".into(), serde_yaml::Value::Bool(true));
+    tun.insert("device".into(), serde_yaml::Value::String("Mihomo".to_string()));
+    tun.insert(
+        "dns-hijack".into(),
+        serde_yaml::Value::Sequence(vec![serde_yaml::Value::String("any:53".to_string())]),
+    );
+    yaml["tun"] = serde_yaml::Value::Mapping(tun);
 
     serde_yaml::to_string(&yaml).map_err(|e| format!("Failed to serialize YAML: {}", e))
 }
@@ -933,6 +966,19 @@ pub fn get_mihomo_logs(app: AppHandle) -> Result<Vec<LogEntry>, String> {
         }
     }
     Ok(logs)
+}
+
+#[tauri::command]
+pub fn clear_mihomo_logs(app: AppHandle) -> Result<(), String> {
+    let config_dir = primary_config_dir(&app);
+    let log_path = config_dir.join("mihomo.log");
+
+    if !log_path.exists() {
+        return Ok(());
+    }
+
+    fs::write(&log_path, "").map_err(|e| format!("Failed to clear logs: {}", e))?;
+    Ok(())
 }
 
 #[tauri::command]

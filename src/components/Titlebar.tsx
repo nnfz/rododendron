@@ -7,9 +7,10 @@ interface TitlebarProps {
   showSidebarToggle?: boolean;
   sidebarOpen?: boolean;
   onToggleSidebar?: () => void;
+  closeBehavior?: 'tray' | 'exit';
 }
 
-export default function Titlebar({ showSidebarToggle, sidebarOpen, onToggleSidebar }: TitlebarProps) {
+export default function Titlebar({ showSidebarToggle, sidebarOpen, onToggleSidebar, closeBehavior = 'tray' }: TitlebarProps) {
   const { t } = useI18n();
   const [appWindow, setAppWindow] = useState<Awaited<ReturnType<typeof import('@tauri-apps/api/window').getCurrentWindow>> | null>(null);
 
@@ -32,8 +33,13 @@ export default function Titlebar({ showSidebarToggle, sidebarOpen, onToggleSideb
   }, [appWindow]);
 
   const handleClose = useCallback(async () => {
-    await appWindow?.hide();
-  }, [appWindow]);
+    if (!appWindow) return;
+    if (closeBehavior === 'exit') {
+      await appWindow.close();
+      return;
+    }
+    await appWindow.hide();
+  }, [appWindow, closeBehavior]);
 
   return (
     <div data-tauri-drag-region className="titlebar">

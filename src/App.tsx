@@ -120,8 +120,7 @@ export default function App() {
 
 
   // Global VPN statistics
-  const pingHost = vpnStatus?.server || parsedConfig?.server_address || '1.1.1.1';
-  const { traffic, latency, formatUptime, formatTraffic } = useVPNStats(vpnEnabled, pingHost);
+  const { traffic, latency, formatUptime, formatTraffic } = useVPNStats(vpnEnabled);
 
   const restartVPN = useCallback(async (rulesOverride?: Rule[]) => {
     // Coalesce rapid changes: keep only the latest rules snapshot.
@@ -176,7 +175,9 @@ export default function App() {
         const win = getCurrentWindow();
         await new Promise(resolve => setTimeout(resolve, 100));
         if (settings.startminimized) {
-          await win.hide();
+          if (!win.isMinimized()) {
+            await win.hide();
+          }
         } else {
           await win.show();
           await win.setFocus();
@@ -469,6 +470,7 @@ export default function App() {
         showSidebarToggle={isNarrowLayout}
         sidebarOpen={sidebarOpen}
         onToggleSidebar={() => setSidebarOpen(v => !v)}
+        closeBehavior={settings.closeBehavior}
       />
       {isNarrowLayout && sidebarOpen && (
         <div
@@ -492,6 +494,7 @@ export default function App() {
         showLogsModal={showLogsModal} 
         setShowLogsModal={setShowLogsModal} 
         logs={logs} 
+        setLogs={setLogs}
         settings={settings} 
         setSettings={setSettings} 
         vpnEnabled={vpnEnabled}

@@ -1,5 +1,5 @@
-import { useCallback, useState, useEffect, useMemo } from 'react';
-import { LuDownload, LuX, LuLoader2} from 'react-icons/lu';
+import { useCallback, useState, useEffect, useMemo, useRef } from 'react';
+import { LuDownload, LuX, LuLoader2, LuTrash2} from 'react-icons/lu';
 import { useI18n } from '../i18n';
 import CustomSelect from './CustomSelect';
 import type { Log, LogLevel, Settings } from '../types';
@@ -10,6 +10,7 @@ interface LogsModalProps {
   showLogsModal: boolean;
   setShowLogsModal: (show: boolean) => void;
   logs: Log[];
+  setLogs: Dispatch<SetStateAction<Log[]>>;
   settings: Settings;
   setSettings: Dispatch<SetStateAction<Settings>>;
   vpnEnabled: boolean;
@@ -39,6 +40,7 @@ export default function LogsModal({
   showLogsModal, 
   setShowLogsModal, 
   logs, 
+  setLogs,
   settings, 
   setSettings,
   vpnEnabled 
@@ -47,6 +49,8 @@ export default function LogsModal({
   const [isExporting, setIsExporting] = useState(false);
   const [mihomoLogs, setMihomoLogs] = useState<MihomoLog[]>([]);
   const [query, setQuery] = useState('');
+  const mihomoIdCounterRef = useRef<number>(Date.now());
+  const mihomoIdByKeyRef = useRef<Map<string, number>>(new Map());
 
   const loadMihomoLogs = useCallback(async () => {
     if (!isTauri() || !vpnEnabled) return;
@@ -97,14 +101,6 @@ export default function LogsModal({
     }
   };
 
-  const stableId = (s: string): number => {
-    let hash = 5381;
-    for (let i = 0; i < s.length; i++) {
-      hash = ((hash << 5) + hash) ^ s.charCodeAt(i);
-    }
-    return Math.abs(hash);
-  };
-
   const levelRank = (level: LogLevel): number => {
     switch (level) {
       case 'DEBUG':
@@ -138,17 +134,27 @@ export default function LogsModal({
 
   // Объединяем все логи и сортируем по ID в ОБРАТНОМ порядке (новые сверху)
   const allLogs = useMemo(() => {
-    const mihomoMapped: Log[] = mihomoLogs.map((log) => {
+    const mihomoMapped: Log[] = [];
+    for (const log of [...mihomoLogs].slice().reverse()) {
       const time = log.time.split('T')[1]?.split('.')[0] || log.time;
       const level = normalizeLogLevel(log.level);
       const message = `[mihomo] ${log.message}`;
-      return {
-        id: stableId(`${time}|${level}|${message}`),
+      const key = `${time}|${level}|${message}`;
+      let id = mihomoIdByKeyRef.current.get(key);
+      if (!id) {
+        const next = Math.max(Date.now(), mihomoIdCounterRef.current + 1);
+        mihomoIdCounterRef.current = next;
+        id = next;
+        mihomoIdByKeyRef.current.set(key, id);
+      }
+
+      mihomoMapped.push({
+        id,
         time,
         level,
         message,
-      };
-    });
+      });
+    }
 
     const merged = [...logs, ...mihomoMapped];
     const seen = new Set<string>();
@@ -172,8 +178,23 @@ export default function LogsModal({
     });
   }, [allLogs, minLevelRank, query]);
 
+  const clearLogs = useCallback(async () => {
+    setLogs([]);
+    setMihomoLogs([]);
+    setQuery('');
+    mihomoIdByKeyRef.current.clear();
+    mihomoIdCounterRef.current = Date.now();
+
+    if (!isTauri()) return;
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('clear_mihomo_logs');
+    } catch (e) {
+      console.error('Failed to clear mihomo logs:', e);
+    }
+  }, [setLogs]);
+
   const exportLogs = useCallback(async () => {
-    // Для экспорта сортируем в хронологическом порядке (старые сверху)
     const logsForExport = [...filteredLogs].sort((a, b) => a.id - b.id);
     const logText = logsForExport.map(log => `[${log.time}] ${log.level}: ${log.message}`).join('\n');
     const defaultName = `vpn-logs-${new Date().toISOString().split('T')[0]}.txt`;
@@ -221,7 +242,8 @@ export default function LogsModal({
               <CustomSelect 
                 value={settings.logLevel} 
                 onChange={val => setSettings(prev => ({ ...prev, logLevel: val }))} 
-                options={LOG_LEVEL_OPTIONS} 
+                options={LOG_LEVEL_OPTIONS}
+                className="input-logs"
               />
             </div>
             <input
@@ -229,8 +251,12 @@ export default function LogsModal({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Filter logs..."
-              style={{ width: '220px' }}
+              style={{ width: '10rem' }}
             />
+            <button onClick={clearLogs} className="btn btn-secondary-dark" disabled={isExporting}>
+              <LuTrash2 size={16}/>
+              {t.logs.clear}
+            </button>
             <button onClick={exportLogs} className="btn btn-primary-dark" disabled={isExporting}>
               {isExporting ? <LuLoader2 size={16} className="spin" /> : <LuDownload size={16} />}
               {t.logs.export}

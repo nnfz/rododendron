@@ -644,6 +644,10 @@ select.input option {
   z-index: 10000;
 }
 
+.input-logs {
+  min-width: 6rem;
+}
+
 .custom-select-trigger {
   width: 100%;
   padding: 0.75rem 1rem;
@@ -1148,7 +1152,7 @@ select.input option {
 
 .modal {
   border-radius: 0.5rem;
-  width: 800px;
+  width: 900px;
   max-height: 600px;
   display: flex;
   flex-direction: column;
@@ -1156,6 +1160,12 @@ select.input option {
   background: var(--surface);
   border: 1px solid var(--border);
   color: var(--fg);
+}
+
+@media (max-width: 1200px) {
+  .modal {
+    width: 800px;
+  }
 }
 
 .modal-header {

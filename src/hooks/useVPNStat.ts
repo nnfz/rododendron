@@ -7,7 +7,7 @@ interface TrafficStats {
   down: number;
 }
 
-export function useVPNStats(vpnEnabled: boolean, pingHost: string) {
+export function useVPNStats(vpnEnabled: boolean) {
 
   const [uptime, setUptime] = useState({ hours: 0, minutes: 0, seconds: 0 });
   const [traffic, setTraffic] = useState<TrafficStats>({ up: 0, down: 0 });
@@ -183,9 +183,40 @@ export function useVPNStats(vpnEnabled: boolean, pingHost: string) {
     const fetchDelay = async () => {
       try {
         if (stopRef.current) return;
-        const target = pingHost?.trim() || '1.1.1.1';
-        const ms = await invokeTauri<number | null>('ping_host', { host: target });
-        if (!stopRef.current) setLatency(typeof ms === 'number' ? ms : null);
+
+        const pickActiveProxyName = (root: any): string | null => {
+          const table = root?.proxies && typeof root.proxies === 'object' ? root.proxies : root;
+          if (!table || typeof table !== 'object') return null;
+
+          for (const key of ['GLOBAL', 'Proxy', 'PROXY']) {
+            const entry = (table as any)[key];
+            if (entry && typeof entry === 'object' && typeof entry.now === 'string' && entry.now.trim()) {
+              return entry.now.trim();
+            }
+          }
+
+          for (const entry of Object.values(table as Record<string, any>)) {
+            if (entry && typeof entry === 'object' && typeof entry.now === 'string' && entry.now.trim()) {
+              return entry.now.trim();
+            }
+          }
+
+          return null;
+        };
+
+        const proxies = await invokeTauri<any>('mihomo_get_proxies');
+        const proxyName = pickActiveProxyName(proxies);
+        if (!proxyName) {
+          if (!stopRef.current) setLatency(null);
+          return;
+        }
+
+        const delayResp = await invokeTauri<any>('mihomo_get_delay', { proxyName });
+        const delayRaw = (delayResp && typeof delayResp === 'object')
+          ? (delayResp.delay ?? delayResp.Delay ?? delayResp.ms)
+          : delayResp;
+        const delay = Number(delayRaw);
+        if (!stopRef.current) setLatency(Number.isFinite(delay) && delay > 0 ? Math.round(delay) : null);
         delayFailCountRef.current = 0;
       } catch (e) {
         delayFailCountRef.current += 1;
@@ -218,7 +249,7 @@ export function useVPNStats(vpnEnabled: boolean, pingHost: string) {
       clearInterval(delayInterval);
       statsIntervalRef.current = null;
     };
-  }, [vpnEnabled, pingHost]);
+  }, [vpnEnabled]);
 
   const formatUptime = () => {
     const pad = (n: number) => String(n).padStart(2, '0');
