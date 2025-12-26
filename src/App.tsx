@@ -17,7 +17,7 @@ import { isTauri } from './utils/isTauri';
 const EMPTY_LOGS: Log[] = [];
 const HOME_SNAPSHOT_KEY = 'vpn-home-display-snapshot';
 const ACTIVE_CONFIG_KEY = 'vpn-active-config';
-const UPDATE_CHECK_INTERVAL_MS = 300000;
+const UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000;
 const LAST_UPDATE_NOTIFIED_KEY = 'vpn-last-update-notified';
 
 function formatTime(date: Date): string {
@@ -51,6 +51,7 @@ export default function App() {
   const [configsLoaded, setConfigsLoaded] = useState(false);
   const [dismissNoConfigSplash, setDismissNoConfigSplash] = useState(false);
   const [updateAvailable, setUpdateAvailable] = useState(false);
+  const [availableUpdateVersion, setAvailableUpdateVersion] = useState<string | null>(null);
   
   // Config State
   const [configs, setConfigs] = useState<Config[]>([]);
@@ -108,6 +109,7 @@ export default function App() {
     if (!isTauri()) return;
     if (!settings.autoCheckUpdates) {
       setUpdateAvailable(false);
+      setAvailableUpdateVersion(null);
       return;
     }
 
@@ -137,15 +139,14 @@ export default function App() {
     const runCheck = async () => {
       try {
         const { invoke } = await import('@tauri-apps/api/core');
-        const res = (await invoke('check_for_updates')) as {
-          update_available: boolean;
-          latest_version?: string;
-        };
+        const res = (await invoke('check_for_updates')) as { update_available: boolean; latest_version?: string };
 
         if (cancelled) return;
         const isAvailable = !!res?.update_available;
         setUpdateAvailable(isAvailable);
         const v = typeof res?.latest_version === 'string' ? res.latest_version : null;
+
+        setAvailableUpdateVersion(isAvailable ? v : null);
 
         if (isAvailable && v) {
           const lastNotified = localStorage.getItem(LAST_UPDATE_NOTIFIED_KEY);
@@ -667,6 +668,7 @@ export default function App() {
             restartVPN={restartVPN}
             settings={settings}
             setSettings={setSettings}
+            availableUpdateVersion={availableUpdateVersion}
           />
         );
       default:
@@ -682,6 +684,7 @@ export default function App() {
     restartVPN,
     settings,
     wrappedSetActiveConfigId,
+    availableUpdateVersion,
   ]);
 
   return (

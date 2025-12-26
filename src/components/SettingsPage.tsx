@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState, useMemo } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LuChevronRight, LuDownload, LuFileText, LuHelpCircle, LuRefreshCw, LuUpload, LuTrash2 } from 'react-icons/lu';
 import CustomSelect from './CustomSelect';
 import { useI18n } from '../i18n';
@@ -19,6 +19,7 @@ interface SettingsPageProps {
   restartVPN: (rulesOverride?: any[]) => Promise<void>;
   settings: Settings;
   setSettings: Dispatch<SetStateAction<Settings>>;
+  availableUpdateVersion: string | null;
 }
 
 type UpdateCheckResult = {
@@ -46,6 +47,7 @@ function SettingsPage({
   setSettings,
   vpnEnabled,
   restartVPN,
+  availableUpdateVersion,
 }: SettingsPageProps) {
   const { t, language, setLanguage } = useI18n();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -91,6 +93,8 @@ function SettingsPage({
     };
   }, []);
 
+
+
   const toggleSetting = useCallback(async (key: keyof Settings) => {
     try {
       let nextValue = false;
@@ -130,17 +134,11 @@ function SettingsPage({
 
       if (!res?.update_available) {
         setUpdateStatusText(t.settings.upToDate);
-        return;
+      } else {
+        setUpdateStatusText(t.settings.updateAvailable.replace('{version}', res.latest_version || ''));
       }
-
-      if (!res?.asset_name) {
-        setUpdateStatusText(`${t.settings.updateError}: no asset`);
-        return;
-      }
-
-      setUpdateStatusText(`${t.settings.updateAvailable}: v${res.latest_version}`);
     } catch (e) {
-      console.error('Failed to check updates:', e);
+      console.error('Update check failed:', e);
       setUpdateStatusText(t.settings.updateError);
     } finally {
       setIsCheckingUpdates(false);
@@ -492,7 +490,18 @@ function SettingsPage({
               />
             </div>
 
-            <button onClick={() => toggleSetting('killSwitch')} className="panel-row">
+            <div
+              className="panel-row"
+              role="button"
+              tabIndex={0}
+              onClick={() => toggleSetting('killSwitch')}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  toggleSetting('killSwitch');
+                }
+              }}
+            >
               <span className="setting-label setting-label-with-help">
                 {t.settings.killSwitch}
                 <button
@@ -508,7 +517,7 @@ function SettingsPage({
               <div className={`toggle ${settings.killSwitch ? 'on' : ''}`} role="switch" aria-checked={settings.killSwitch}>
                 <div className="toggle-knob" />
               </div>
-            </button>
+            </div>
             <button onClick={() => toggleSetting('enableTun')} className="panel-row">
               <span className="setting-label">{t.settings.enableTun}</span>
               <div className={`toggle ${settings.enableTun ? 'on' : ''}`} role="switch" aria-checked={settings.enableTun}>
@@ -614,7 +623,13 @@ function SettingsPage({
                 disabled={isCheckingUpdates || isInstallingUpdate}
               >
                 <LuRefreshCw size={18} />
-                <span className="setting-label">{t.settings.checkUpdates}</span>
+                
+                <span className="setting-label">
+                  <div className='setting-check-update'>
+                    {availableUpdateVersion ? <span className="update-lamp" aria-hidden="true" /> : null}
+                    {t.settings.checkUpdates}
+                  </div>
+                </span>
               </button>
 
               {updateCheck?.update_available && (

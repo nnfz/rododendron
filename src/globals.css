@@ -433,6 +433,14 @@ body {
   box-shadow: 0 0 0 2px var(--bg);
 }
 
+.update-lamp {
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  background: rgb(239, 68, 68);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.25);
+}
+
 .nav-button:hover {
   color: var(--fg);
   background: var(--surface);
@@ -543,6 +551,15 @@ body {
   font-size: 0.875rem;
   transition: .3s ease;
 }
+
+.setting-check-update{
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+
+}
+
 
 /* Grid system */
 .grid-12 {
