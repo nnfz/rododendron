@@ -18,7 +18,7 @@ const EMPTY_LOGS: Log[] = [];
 const HOME_SNAPSHOT_KEY = 'vpn-home-display-snapshot';
 const ACTIVE_CONFIG_KEY = 'vpn-active-config';
 const UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000;
-const TEST_UPDATE_NOTIFY_INTERVAL_MS = 30 * 1000;
+const TEST_UPDATE_NOTIFY_INTERVAL_MS = 12 * 60 * 60 * 1000;
 
 function formatTime(date: Date): string {
   return date.toTimeString().split(' ')[0];
