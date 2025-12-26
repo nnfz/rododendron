@@ -48,6 +48,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             #[cfg(target_os = "windows")]
             let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/icon.ico"))?;

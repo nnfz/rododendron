@@ -44,7 +44,10 @@
             "fs:allow-read",
             "fs:allow-write",
             "fs:allow-write-text-file",
+            "core:window:allow-set-focus",
             "core:tray:default",
+            "core:webview:default",
+            "notification:default",
             "dialog:default",
             "fs:default"
           ]

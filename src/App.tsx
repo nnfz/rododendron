@@ -18,7 +18,7 @@ const EMPTY_LOGS: Log[] = [];
 const HOME_SNAPSHOT_KEY = 'vpn-home-display-snapshot';
 const ACTIVE_CONFIG_KEY = 'vpn-active-config';
 const UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000;
-const LAST_UPDATE_NOTIFIED_KEY = 'vpn-last-update-notified';
+const TEST_UPDATE_NOTIFY_INTERVAL_MS = 30 * 1000;
 
 function formatTime(date: Date): string {
   return date.toTimeString().split(' ')[0];
@@ -36,6 +36,7 @@ export default function App() {
   const restartVpnInFlightRef = useRef(false);
   const restartVpnPendingRulesRef = useRef<Rule[] | null>(null);
   const prevNarrowLayoutRef = useRef<boolean | null>(null);
+  const updateNotifiedThisStartupRef = useRef(false);
   
   // UI State
   const [isNarrowLayout, setIsNarrowLayout] = useState(false);
@@ -85,6 +86,47 @@ export default function App() {
     }
   }, []);
 
+  const notifyUpdate = useCallback(async (version: string) => {
+    const message = `Update available: v${version}`;
+
+    try {
+      const plugin = await import('@tauri-apps/plugin-notification');
+      await plugin.sendNotification({ title: 'Rododendron', body: message });
+      return;
+    } catch {
+      // ignore
+    }
+
+    try {
+      if (typeof Notification === 'undefined') return;
+      if (Notification.permission === 'granted') {
+        new Notification('Rododendron', { body: message });
+        return;
+      }
+      if (Notification.permission !== 'denied') {
+        const res = await Notification.requestPermission();
+        if (res === 'granted') {
+          new Notification('Rododendron', { body: message });
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    if (!availableUpdateVersion) return;
+
+    const tick = () => {
+      void notifyUpdate(availableUpdateVersion);
+    };
+
+    tick();
+    const id = setInterval(tick, TEST_UPDATE_NOTIFY_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [availableUpdateVersion, notifyUpdate]);
+
   // Сохранение snapshot в localStorage
   useEffect(() => {
     if (!homeDisplaySnapshot) return;
@@ -110,31 +152,14 @@ export default function App() {
     if (!settings.autoCheckUpdates) {
       setUpdateAvailable(false);
       setAvailableUpdateVersion(null);
+      updateNotifiedThisStartupRef.current = false;
       return;
     }
 
+    updateNotifiedThisStartupRef.current = false;
+
     let cancelled = false;
     let interval: ReturnType<typeof setInterval> | null = null;
-
-    const notifyUpdate = async (version: string) => {
-      const message = `Update available: v${version}`;
-
-      try {
-        if (typeof Notification === 'undefined') return;
-        if (Notification.permission === 'granted') {
-          new Notification('Rododendron', { body: message });
-          return;
-        }
-        if (Notification.permission !== 'denied') {
-          const res = await Notification.requestPermission();
-          if (res === 'granted') {
-            new Notification('Rododendron', { body: message });
-          }
-        }
-      } catch {
-        // ignore
-      }
-    };
 
     const runCheck = async () => {
       try {
@@ -148,13 +173,10 @@ export default function App() {
 
         setAvailableUpdateVersion(isAvailable ? v : null);
 
-        if (isAvailable && v) {
-          const lastNotified = localStorage.getItem(LAST_UPDATE_NOTIFIED_KEY);
-          if (lastNotified !== v) {
-            localStorage.setItem(LAST_UPDATE_NOTIFIED_KEY, v);
-            addLog('INFO', `Update available: v${v}`);
-            await notifyUpdate(v);
-          }
+        if (isAvailable && v && !updateNotifiedThisStartupRef.current) {
+          updateNotifiedThisStartupRef.current = true;
+          addLog('INFO', `Update available: v${v}`);
+          await notifyUpdate(v);
         }
       } catch (e) {
         if (!cancelled) {
