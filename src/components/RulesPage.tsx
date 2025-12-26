@@ -22,11 +22,6 @@ interface ProcessInfo {
   icon?: string | null;
 }
 
-const RULE_TYPE_OPTIONS = [
-  { value: 'Via VPN', label: 'Via VPN' },
-  { value: 'Direct', label: 'Direct' },
-] as const;
-
 const RULE_TYPE_ICONS = {
   process: LuMonitor,
   domain: LuGlobe,
