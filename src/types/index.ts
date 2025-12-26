@@ -20,6 +20,7 @@ export interface Settings {
   startminimized: boolean;
   autoConnect: boolean;
   autoCheckUpdates: boolean;
+  autoRestartOnRuleApply: boolean;
   closeBehavior: 'tray' | 'exit';
   killSwitch: boolean;
   logLevel: string;

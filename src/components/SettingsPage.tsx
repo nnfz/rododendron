@@ -1,10 +1,10 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { LuChevronRight, LuDownload, LuFileText, LuHelpCircle, LuRefreshCw, LuUpload, LuTrash2 } from 'react-icons/lu';
+import { LuChevronRight, LuDownload, LuFileText, LuHelpCircle, LuRefreshCw, LuUpload, LuTrash2, LuX } from 'react-icons/lu';
 import CustomSelect from './CustomSelect';
 import { useI18n } from '../i18n';
 import type { Language } from '../i18n/translations';
 import type { Settings, Config, ParsedConfig } from '../types';
-import type { Dispatch, SetStateAction } from 'react';
+import type { CSSProperties, Dispatch, SetStateAction } from 'react';
 import { isTauri } from '../utils/isTauri';
 
 interface SettingsPageProps {
@@ -37,6 +37,15 @@ const MTU_DEFAULT = '1500';
 const DELETE_CONFIRM_TIMEOUT = 3000;
 const MIHOMO_CORE_VERSION = '1.19.18';
 
+const EASTER_EGG_IMAGE_URLS: string[] = [
+  'https://sun9-23.userapi.com/s/v1/ig2/UxlCqEp8iuDBw9X7APXtXfiz9XPl60eMlMB_Z-auRwfcfRiHLeLCCBmYfjgTZMiR7K9BJ8NluXWEMVZ0EsYm_F2P.jpg?quality=95&as=32x37,48x56,72x84,108x126,160x186,208x242&from=bu&cs=208x0',
+  'https://sun9-17.userapi.com/s/v1/ig2/QWx-DlwGizCMUxXvnMggm9qBbr9S1E7KQVE3BJOzh1bLObLWTMGmmaZSSF038V_jthBcHpe30jS839PhjXwsH8wE.jpg?quality=95&as=32x15,48x23,72x35,108x52,160x77,240x115,360x173,418x201&from=bu&cs=418x0',
+  'https://sun9-87.userapi.com/s/v1/ig2/gpHJB5fgO5e5QTFOZWEPwaHIw2ADvchMF04nokaH6BXLtumYocYQzWD6ZwtJukkyPkIkRRCBdLQCmX8UGngw_p57.jpg?quality=95&as=32x24,48x36,72x54,108x81,160x120,240x180,360x270,480x359,540x404,640x479,720x539,800x599&from=bu&cs=800x0',
+  'https://sun9-19.userapi.com/s/v1/ig2/iG3zzJcnf5rvEczGebCw7DHKbbVs9npk3043DzGONUZwrg0NLOMhGYtowxnE-CZfU7ogsBsUVuHnP98Zr2hQ9mTH.jpg?quality=95&as=32x24,48x36,72x54,108x81,160x120,240x180,360x270,450x337&from=bu&cs=450x0',
+  'https://sun9-79.userapi.com/s/v1/ig2/Uf0zlawdQDvRUd4-OmlD8gGTcjJ8SUuOH4bm_x2m9yaiMyAaYSeT_SCfdQs-PHxKY1hKqqOxZLqWnvzueo2iuTtZ.jpg?quality=95&as=32x32,48x48,72x72,108x108,160x160,240x240,300x300&from=bu&cs=300x0',
+  'https://sun9-15.userapi.com/s/v1/ig2/QJ-d3NRMWhjIgbWkQ4BAMEweNhpfEsxSmvvJzltIZ_rdryR-5hIH4GYBHVmG7V7aTu4P1BGgzAVQduWf5ibgFKpI.jpg?quality=95&as=32x48,48x72,72x108,108x162,160x240,183x275&from=bu&cs=183x0'
+];
+
 function SettingsPage({
   setShowLogsModal,
   configs,
@@ -62,6 +71,11 @@ function SettingsPage({
   const [mihomoCoreName, setMihomoCoreName] = useState<string>('mihomo');
   const [vlessImportError, setVlessImportError] = useState<string | null>(null);
   const [isImportingVless, setIsImportingVless] = useState(false);
+
+  const [versionClickCount, setVersionClickCount] = useState(0);
+  const [versionKickColor, setVersionKickColor] = useState<string | null>(null);
+  const [showEasterEggModal, setShowEasterEggModal] = useState(false);
+  const [easterEggImageUrl, setEasterEggImageUrl] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -92,8 +106,6 @@ function SettingsPage({
       }
     };
   }, []);
-
-
 
   const toggleSetting = useCallback(async (key: keyof Settings) => {
     try {
@@ -382,9 +394,41 @@ function SettingsPage({
   ], [t.settings]);
 
   const mihomoCoreDisplayName = useMemo(() => {
-    const base = mihomoCoreName.replace(/\.[^./\\]+$/, '');
-    return `${base} (${MIHOMO_CORE_VERSION})`;
+    return `${mihomoCoreName} ${MIHOMO_CORE_VERSION}`;
   }, [mihomoCoreName]);
+
+  const versionKickLevel = useMemo(() => {
+    return Math.max(0, versionClickCount - 5);
+  }, [versionClickCount]);
+
+  const versionKickShakePx = useMemo(() => {
+    const px = Math.min(16, versionKickLevel * 2);
+    return `${px}px`;
+  }, [versionKickLevel]);
+
+  const handleVersionEasterEggClick = useCallback(() => {
+    setVersionClickCount((prev) => {
+      const next = prev + 1;
+
+      if (next >= 6) {
+        const randomHue = Math.floor(Math.random() * 360);
+        const randomSat = 70 + Math.floor(Math.random() * 20);
+        const randomLight = 55 + Math.floor(Math.random() * 10);
+        setVersionKickColor(`hsl(${randomHue} ${randomSat}% ${randomLight}%)`);
+      }
+
+      if (next >= 10) {
+        const urls = EASTER_EGG_IMAGE_URLS.filter(Boolean);
+        const url = urls.length ? urls[Math.floor(Math.random() * urls.length)] : null;
+        setEasterEggImageUrl(url);
+        setShowEasterEggModal(true);
+        setVersionKickColor(null);
+        return 0;
+      }
+
+      return next;
+    });
+  }, []);
 
   return (
     <div className="page-content">
@@ -480,7 +524,6 @@ function SettingsPage({
                 <div className="toggle-knob" />
               </div>
             </button>
-
             <div className="panel-row disabled">
               <span className="setting-label">{t.settings.closeBehavior}</span>
               <CustomSelect
@@ -489,7 +532,12 @@ function SettingsPage({
                 options={closeBehaviorOptions}
               />
             </div>
-
+            <button onClick={() => toggleSetting('autoRestartOnRuleApply')} className="panel-row">
+              <span className="setting-label">{t.settings.autoRestartOnRuleApply}</span>
+              <div className={`toggle ${settings.autoRestartOnRuleApply ? 'on' : ''}`} role="switch" aria-checked={settings.autoRestartOnRuleApply}>
+                <div className="toggle-knob" />
+              </div>
+            </button>
             <div
               className="panel-row"
               role="button"
@@ -581,8 +629,6 @@ function SettingsPage({
             </div>
           </div>
         </div>
-
-        {/* Logs */}
         <div>
           <h3 className="section-heading">{t.settings.logsAndDiagnostics}</h3>
           <div className="panel">
@@ -601,21 +647,42 @@ function SettingsPage({
           <h3 className="section-heading">{t.settings.about}</h3>
           <div className="panel">
             <div className="panel-row disabled">
-              <span className="setting-label">{t.settings.version}</span>
-              <span className="setting-value">{__APP_VERSION__}</span>
+              <span className='setting-label'>{t.settings.version}</span>
+              <span
+                className={`setting-value ${versionKickLevel > 0 ? 'version-kicked' : ''}`}
+                role="button"
+                tabIndex={0}
+                onClick={handleVersionEasterEggClick}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    handleVersionEasterEggClick();
+                  }
+                }}
+                style={
+                  versionKickLevel > 0
+                    ? (
+                        {
+                          color: versionKickColor ?? undefined,
+                          ['--version-kick-shake' as any]: versionKickShakePx,
+                        } as CSSProperties
+                      )
+                    : undefined
+                }
+              >
+                {__APP_VERSION__}
+              </span>
             </div>
             <div className="panel-row disabled">
               <span className="setting-label">{t.settings.versioncore}</span>
               <span className="setting-value">{mihomoCoreDisplayName}</span>
             </div>
-
             <button onClick={() => toggleSetting('autoCheckUpdates')} className="panel-row">
               <span className="setting-label">{t.settings.autoCheckUpdates}</span>
               <div className={`toggle ${settings.autoCheckUpdates ? 'on' : ''}`} role="switch" aria-checked={settings.autoCheckUpdates}>
                 <div className="toggle-knob" />
               </div>
             </button>
-
             <div className="config-actions">
               <button
                 onClick={handleCheckUpdates}
@@ -623,7 +690,6 @@ function SettingsPage({
                 disabled={isCheckingUpdates || isInstallingUpdate}
               >
                 <LuRefreshCw size={18} />
-                
                 <span className="setting-label">
                   <div className='setting-check-update'>
                     {availableUpdateVersion ? <span className="update-lamp" aria-hidden="true" /> : null}
@@ -652,8 +718,39 @@ function SettingsPage({
           </div>
         </div>
       </div>
+
+      {showEasterEggModal && (
+        <div
+          className="modal-backdrop animate-fadeIn"
+          onClick={() => setShowEasterEggModal(false)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="modal easteregg-modal animate-scaleIn" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">Спешл фо азат</h3>
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  onClick={() => setShowEasterEggModal(false)}
+                  className="btn btn-icon"
+                  aria-label={t.common.close}
+                >
+                  <LuX size={20} />
+                </button>
+              </div>
+            </div>
+            <div className="modal-body easteregg-modal-body">
+              {easterEggImageUrl ? (
+                <img src={easterEggImageUrl} alt="" className="easteregg-image" />
+              ) : (
+                <div className="easteregg-empty">боо</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
-
 export default memo(SettingsPage);

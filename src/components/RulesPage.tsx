@@ -11,6 +11,7 @@ interface RulesPageProps {
   vpnEnabled: boolean;
   restartVPN: (rulesOverride?: Rule[]) => Promise<void>;
   activeConfigFilename: string | null;
+  autoRestartOnRuleApply: boolean;
 }
 
 type RuleType = 'process' | 'domain' | 'domain_keyword';
@@ -34,7 +35,7 @@ const RULE_TYPE_LABELS = {
   domain_keyword: 'Keyword',
 } as const;
 
-function RulesPage({ rules, setRules, vpnEnabled, restartVPN }: RulesPageProps) {
+function RulesPage({ rules, setRules, vpnEnabled, restartVPN, autoRestartOnRuleApply }: RulesPageProps) {
   const { t } = useI18n();
   const [osPlatform, setOsPlatform] = useState<'windows' | 'macos' | 'linux' | 'unknown'>('unknown');
   const [newRuleApp, setNewRuleApp] = useState('');
@@ -114,11 +115,11 @@ function RulesPage({ rules, setRules, vpnEnabled, restartVPN }: RulesPageProps) 
   const toggleRule = useCallback(async (id: number) => {
     const nextRules = rules.map(r => r.id === id ? { ...r, active: !r.active } : r);
     setRules(nextRules);
-    if (vpnEnabled) {
+    if (vpnEnabled && autoRestartOnRuleApply) {
       await new Promise(resolve => setTimeout(resolve, 500));
       await restartVPN(nextRules);
     }
-  }, [rules, setRules, vpnEnabled, restartVPN]);
+  }, [rules, setRules, vpnEnabled, restartVPN, autoRestartOnRuleApply]);
 
   const isValidProcessTarget = useCallback((raw: string): boolean => {
     const s = raw.trim();
@@ -149,10 +150,10 @@ function RulesPage({ rules, setRules, vpnEnabled, restartVPN }: RulesPageProps) 
   const deleteRule = useCallback(async (id: number) => {
     const nextRules = rules.filter(r => r.id !== id);
     setRules(nextRules);
-    if (vpnEnabled) {
+    if (vpnEnabled && autoRestartOnRuleApply) {
       await restartVPN(nextRules);
     }
-  }, [rules, setRules, vpnEnabled, restartVPN]);
+  }, [rules, setRules, vpnEnabled, restartVPN, autoRestartOnRuleApply]);
 
   const addRule = useCallback(async () => {
     const normalizeTarget = (raw: string) => {
@@ -208,11 +209,11 @@ function RulesPage({ rules, setRules, vpnEnabled, restartVPN }: RulesPageProps) 
     setNewRuleApp('');
     setNewRuleInputError(false);
 
-    if (vpnEnabled) {
+    if (vpnEnabled && autoRestartOnRuleApply) {
       await new Promise(resolve => setTimeout(resolve, 500));
       await restartVPN(nextRules);
     }
-  }, [newRuleApp, newRuleAction, newRuleType, rules, setRules, vpnEnabled, restartVPN, isValidProcessTarget, triggerNewRuleInputError]);
+  }, [newRuleApp, newRuleAction, newRuleType, rules, setRules, vpnEnabled, restartVPN, autoRestartOnRuleApply, isValidProcessTarget, triggerNewRuleInputError]);
 
   const handleKeyPress = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {

@@ -71,6 +71,7 @@ export type Translations = {
     mainSettings: string;
     importurl: string;
     autoCheckUpdates: string;
+    autoRestartOnRuleApply: string;
     autoConnect: string;
     autoLaunch: string;
     enableTun: string;
@@ -189,6 +190,7 @@ export const translations: Record<Language, Translations> = {
       logs: 'Logs',
       importurl: 'Import from clipboard',
       autoCheckUpdates: 'Auto check updates',
+      autoRestartOnRuleApply: 'Auto restart VPN on rule change',
       importConfig: 'Import configuration',
       exportConfig: 'Export configuration',
       deleteConfig: 'Delete configuration',
@@ -340,6 +342,7 @@ export const translations: Record<Language, Translations> = {
       about: 'О программе',
       version: 'Версия',
       versioncore: 'Версия ядра',
+      autoRestartOnRuleApply: 'Автоперезапуск VPN при изменении правил',
     },
     logs: {
       title: 'Логи приложения',
@@ -434,6 +437,7 @@ export const translations: Record<Language, Translations> = {
       deleteConfig: 'Выдаліць канфігурацыю',
       importurl: 'Уставіць з буфера абмену',
       autoCheckUpdates: 'Аўтапраўерка абнаўленняў',
+      autoRestartOnRuleApply: 'Аўтаперазапуск VPN пры змене правіл',
       enableTun: 'Уключыць TUN',
       logs: 'Логі',
       confirmDelete: 'Вы ўпэўнены?',

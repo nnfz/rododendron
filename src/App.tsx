@@ -674,6 +674,7 @@ export default function App() {
             vpnEnabled={vpnEnabled}
             restartVPN={restartVPN}
             activeConfigFilename={activeConfigFilename}
+            autoRestartOnRuleApply={settings.autoRestartOnRuleApply}
           />
         );
       case 'settings':
