@@ -600,6 +600,13 @@ function SettingsPage({
               <span className="setting-value">{mihomoCoreDisplayName}</span>
             </div>
 
+            <button onClick={() => toggleSetting('autoCheckUpdates')} className="panel-row">
+              <span className="setting-label">{t.settings.autoCheckUpdates}</span>
+              <div className={`toggle ${settings.autoCheckUpdates ? 'on' : ''}`} role="switch" aria-checked={settings.autoCheckUpdates}>
+                <div className="toggle-knob" />
+              </div>
+            </button>
+
             <div className="config-actions">
               <button
                 onClick={handleCheckUpdates}

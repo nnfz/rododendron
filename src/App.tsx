@@ -17,6 +17,8 @@ import { isTauri } from './utils/isTauri';
 const EMPTY_LOGS: Log[] = [];
 const HOME_SNAPSHOT_KEY = 'vpn-home-display-snapshot';
 const ACTIVE_CONFIG_KEY = 'vpn-active-config';
+const UPDATE_CHECK_INTERVAL_MS = 300000;
+const LAST_UPDATE_NOTIFIED_KEY = 'vpn-last-update-notified';
 
 function formatTime(date: Date): string {
   return date.toTimeString().split(' ')[0];
@@ -48,6 +50,7 @@ export default function App() {
   const [logs, setLogs] = useState<Log[]>([]);
   const [configsLoaded, setConfigsLoaded] = useState(false);
   const [dismissNoConfigSplash, setDismissNoConfigSplash] = useState(false);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
   
   // Config State
   const [configs, setConfigs] = useState<Config[]>([]);
@@ -100,6 +103,75 @@ export default function App() {
       message
     }, ...prev].slice(0, 1000));
   }, []);
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    if (!settings.autoCheckUpdates) {
+      setUpdateAvailable(false);
+      return;
+    }
+
+    let cancelled = false;
+    let interval: ReturnType<typeof setInterval> | null = null;
+
+    const notifyUpdate = async (version: string) => {
+      const message = `Update available: v${version}`;
+
+      try {
+        if (typeof Notification === 'undefined') return;
+        if (Notification.permission === 'granted') {
+          new Notification('Rododendron', { body: message });
+          return;
+        }
+        if (Notification.permission !== 'denied') {
+          const res = await Notification.requestPermission();
+          if (res === 'granted') {
+            new Notification('Rododendron', { body: message });
+          }
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    const runCheck = async () => {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const res = (await invoke('check_for_updates')) as {
+          update_available: boolean;
+          latest_version?: string;
+        };
+
+        if (cancelled) return;
+        const isAvailable = !!res?.update_available;
+        setUpdateAvailable(isAvailable);
+        const v = typeof res?.latest_version === 'string' ? res.latest_version : null;
+
+        if (isAvailable && v) {
+          const lastNotified = localStorage.getItem(LAST_UPDATE_NOTIFIED_KEY);
+          if (lastNotified !== v) {
+            localStorage.setItem(LAST_UPDATE_NOTIFIED_KEY, v);
+            addLog('INFO', `Update available: v${v}`);
+            await notifyUpdate(v);
+          }
+        }
+      } catch (e) {
+        if (!cancelled) {
+          console.error('Auto update check failed:', e);
+        }
+      }
+    };
+
+    runCheck();
+    interval = setInterval(runCheck, UPDATE_CHECK_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      if (interval) {
+        clearInterval(interval);
+      }
+    };
+  }, [settings.autoCheckUpdates, addLog]);
   
   // Загрузка конфигураций
   useEffect(() => {
@@ -668,6 +740,7 @@ export default function App() {
           vpnEnabled={vpnEnabled} 
           restartVPN={restartVPN}
           hasConfig={!!activeConfigContent}
+          hasUpdate={updateAvailable}
           className={isNarrowLayout ? `sidebar-floating ${sidebarOpen ? 'sidebar-open' : ''}` : ''}
         />
         <main className="app-main">

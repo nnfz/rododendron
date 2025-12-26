@@ -70,6 +70,7 @@ export type Translations = {
     logs: string;
     mainSettings: string;
     importurl: string;
+    autoCheckUpdates: string;
     autoConnect: string;
     autoLaunch: string;
     enableTun: string;
@@ -187,6 +188,7 @@ export const translations: Record<Language, Translations> = {
       logsAndDiagnostics: 'Logs and diagnostics',
       logs: 'Logs',
       importurl: 'Import from clipboard',
+      autoCheckUpdates: 'Auto check updates',
       importConfig: 'Import configuration',
       exportConfig: 'Export configuration',
       deleteConfig: 'Delete configuration',
@@ -308,6 +310,7 @@ export const translations: Record<Language, Translations> = {
       exportConfig: 'Экспорт конфигурации',
       deleteConfig: 'Удалить конфигурацию',
       importurl: 'Вставить из буфера обмена',
+      autoCheckUpdates: 'Автопроверка обновлений',
       interfaceLanguage: 'Язык интерфейса',
       logsAndDiagnostics: 'Логи и диагностика',
       enableTun: 'Включить TUN',
@@ -430,6 +433,7 @@ export const translations: Record<Language, Translations> = {
       exportConfig: 'Экспарт канфігурацыі',
       deleteConfig: 'Выдаліць канфігурацыю',
       importurl: 'Уставіць з буфера абмену',
+      autoCheckUpdates: 'Аўтапраўерка абнаўленняў',
       enableTun: 'Уключыць TUN',
       logs: 'Логі',
       confirmDelete: 'Вы ўпэўнены?',

@@ -9,10 +9,11 @@ interface SidebarProps {
   vpnEnabled: boolean;
   restartVPN: () => void;
   hasConfig: boolean;
+  hasUpdate?: boolean;
   className?: string;
 }
 
-function Sidebar({ activeTab, setActiveTab, vpnEnabled, restartVPN, hasConfig, className }: SidebarProps) {
+function Sidebar({ activeTab, setActiveTab, vpnEnabled, restartVPN, hasConfig, hasUpdate, className }: SidebarProps) {
   const { t } = useI18n();
 
   const handleRestart = () => {
@@ -52,7 +53,10 @@ function Sidebar({ activeTab, setActiveTab, vpnEnabled, restartVPN, hasConfig, c
           className={`nav-button ${activeTab === 'settings' ? 'active' : ''}`}
           aria-current={activeTab === 'settings' ? 'page' : undefined}
         >
-          <LuSettings size={18} strokeWidth={1.5} />
+          <span className="nav-icon">
+            <LuSettings size={18} strokeWidth={1.5} />
+            {hasUpdate ? <span className="update-dot" /> : null}
+          </span>
           <span>{t.sidebar.settings}</span>
         </button>
       </nav>

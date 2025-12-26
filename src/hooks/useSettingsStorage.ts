@@ -9,6 +9,7 @@ const DEFAULT_SETTINGS: Settings = {
   autostart: false,
   startminimized: false,
   autoConnect: false,
+  autoCheckUpdates: true,
   closeBehavior: 'tray',
   killSwitch: false,
   logLevel: 'info',
