@@ -3195,7 +3195,7 @@ dependencies = [
 
 [[package]]
 name = "rododendron"
-version = "0.4.0"
+version = "0.4.4"
 dependencies = [
  "base64 0.22.1",
  "chrono",
