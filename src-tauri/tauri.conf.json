@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Rododendron",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "identifier": "com.nnfz.rododendron",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -29,7 +29,9 @@
       "capabilities": [
         {
           "identifier": "main-window",
-          "windows": ["main"],
+          "windows": [
+            "main"
+          ],
           "permissions": [
             "core:window:allow-close",
             "core:window:allow-minimize",
@@ -42,7 +44,7 @@
             "fs:allow-read",
             "fs:allow-write",
             "fs:allow-write-text-file",
-            "core:tray:default", 
+            "core:tray:default",
             "dialog:default",
             "fs:default"
           ]
@@ -54,7 +56,9 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "resources": ["bin/*"],
+    "resources": [
+      "bin/*"
+    ],
     "icon": [
       "icons/128x128.png",
       "icons/128x128@2x.png",

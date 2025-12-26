@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::io::{BufRead, BufReader, Write};
 use std::collections::HashSet;
 use std::sync::LazyLock;
@@ -21,12 +21,12 @@ struct ControllerConfig {
     secret: Option<String>,
 }
 
-static CONTROLLER_CONFIG: LazyLock<Mutex<ControllerConfig>> = LazyLock::new(|| {
-    Mutex::new(ControllerConfig {
+static CONTROLLER_CONFIG: LazyLock<Arc<Mutex<ControllerConfig>>> = LazyLock::new(|| {
+    Arc::new(Mutex::new(ControllerConfig {
         host: String::from("127.0.0.1"),
         port: 9090,
         secret: None,
-    })
+    }))
 });
 
 fn update_controller_config(config_content: &str) {
@@ -54,11 +54,6 @@ fn update_controller_config(config_content: &str) {
     };
 
     if !ext.is_empty() {
-        // Typical values:
-        // - 127.0.0.1:9090
-        // - 0.0.0.0:9090
-        // - :9090
-        // - http://127.0.0.1:9090 (rare)
         let ext = ext.strip_prefix("http://").unwrap_or(ext);
         let ext = ext.strip_prefix("https://").unwrap_or(ext);
 
@@ -128,17 +123,8 @@ fn has_admin_privileges() -> bool {
     nix::unistd::geteuid().is_root()
 }
 
-// pub fn is_elevated() -> bool {
-//     has_admin_privileges()
-// }
-
-// Проверка существующих процессов mihomo
 #[cfg(target_os = "windows")]
 fn kill_existing_mihomo() {
-    use std::process::Command;
-
-    use std::os::windows::process::CommandExt;
-
     let _ = Command::new("taskkill")
         .args(["/F", "/IM", get_binary_name()])
         .creation_flags(0x08000000)
@@ -147,7 +133,6 @@ fn kill_existing_mihomo() {
 
 #[cfg(target_os = "linux")]
 fn kill_existing_mihomo() {
-    use std::process::Command;
     let _ = Command::new("pkill")
         .arg("-9")
         .arg(get_binary_name())
@@ -156,7 +141,6 @@ fn kill_existing_mihomo() {
 
 #[cfg(target_os = "macos")]
 fn kill_existing_mihomo() {
-    use std::process::Command;
     let _ = Command::new("pkill")
         .arg("-9")
         .arg(get_binary_name())
@@ -221,14 +205,21 @@ pub struct LogEntry {
     pub message: String,
 }
 
+// Оптимизация: кэширование клиента reqwest
+static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
+});
+
 async fn mihomo_get_json<T: for<'de> Deserialize<'de>>(paths: &[&str]) -> Result<T, String> {
-    let client = reqwest::Client::new();
     let cfg = CONTROLLER_CONFIG.lock().map_err(|e| e.to_string())?.clone();
     let mut last_err: Option<String> = None;
 
     for path in paths {
         let url = format!("http://{}:{}{}", cfg.host, cfg.port, path);
-        let mut req = client.get(url);
+        let mut req = HTTP_CLIENT.get(url);
         if let Some(secret) = &cfg.secret {
             req = req.header(reqwest::header::AUTHORIZATION, format!("Bearer {}", secret));
         }
@@ -251,13 +242,12 @@ async fn mihomo_get_json<T: for<'de> Deserialize<'de>>(paths: &[&str]) -> Result
 }
 
 async fn mihomo_get_json_value(paths: &[&str]) -> Result<serde_json::Value, String> {
-    let client = reqwest::Client::new();
     let cfg = CONTROLLER_CONFIG.lock().map_err(|e| e.to_string())?.clone();
     let mut last_err: Option<String> = None;
 
     for path in paths {
         let url = format!("http://{}:{}{}", cfg.host, cfg.port, path);
-        let mut req = client.get(url);
+        let mut req = HTTP_CLIENT.get(url);
         if let Some(secret) = &cfg.secret {
             req = req.header(reqwest::header::AUTHORIZATION, format!("Bearer {}", secret));
         }
@@ -269,7 +259,6 @@ async fn mihomo_get_json_value(paths: &[&str]) -> Result<serde_json::Value, Stri
                     continue;
                 }
 
-                let status = resp.status();
                 let body = resp.text().await.map_err(|e| e.to_string())?;
                 if body.trim().is_empty() {
                     return Ok(serde_json::json!({}));
@@ -279,8 +268,8 @@ async fn mihomo_get_json_value(paths: &[&str]) -> Result<serde_json::Value, Stri
                     Err(e) => {
                         let snippet: String = body.chars().take(300).collect();
                         last_err = Some(format!(
-                            "Failed to decode JSON from {} (HTTP {}): {}. Body: {}",
-                            path, status, e, snippet
+                            "Failed to decode JSON: {}. Body: {}",
+                            e, snippet
                         ));
                     }
                 }
@@ -294,18 +283,16 @@ async fn mihomo_get_json_value(paths: &[&str]) -> Result<serde_json::Value, Stri
     Err(last_err.unwrap_or_else(|| "Failed to fetch mihomo controller".to_string()))
 }
 
+#[inline]
 fn value_to_u64(v: Option<&serde_json::Value>) -> u64 {
     match v {
         Some(serde_json::Value::Number(n)) => {
-            if let Some(u) = n.as_u64() {
-                u
-            } else if let Some(i) = n.as_i64() {
-                i.max(0) as u64
-            } else if let Some(f) = n.as_f64() {
-                if f.is_finite() && f > 0.0 { f.floor() as u64 } else { 0 }
-            } else {
-                0
-            }
+            n.as_u64()
+                .or_else(|| n.as_i64().map(|i| i.max(0) as u64))
+                .or_else(|| n.as_f64().and_then(|f| {
+                    if f.is_finite() && f > 0.0 { Some(f.floor() as u64) } else { None }
+                }))
+                .unwrap_or(0)
         }
         Some(serde_json::Value::String(s)) => s
             .parse::<f64>()
@@ -319,58 +306,45 @@ fn value_to_u64(v: Option<&serde_json::Value>) -> u64 {
 
 #[tauri::command]
 pub async fn mihomo_get_traffic() -> Result<MihomoTraffic, String> {
-    let v = mihomo_get_json_value(&[
-        "/v1/traffic",
-        "/traffic",
-    ])
-    .await?;
-
-    // Controllers differ across builds; accept numbers/strings/floats.
-    let up = value_to_u64(v.get("up"));
-    let down = value_to_u64(v.get("down"));
-
-    Ok(MihomoTraffic { up, down })
+    let v = mihomo_get_json_value(&["/v1/traffic", "/traffic"]).await?;
+    Ok(MihomoTraffic {
+        up: value_to_u64(v.get("up")),
+        down: value_to_u64(v.get("down")),
+    })
 }
 
 #[tauri::command]
 pub async fn mihomo_get_proxies() -> Result<serde_json::Value, String> {
-    mihomo_get_json_value(&[
-        "/v1/proxies",
-        "/proxies",
-    ])
-    .await
+    mihomo_get_json_value(&["/v1/proxies", "/proxies"]).await
 }
 
 #[tauri::command]
 pub async fn mihomo_get_connections() -> Result<serde_json::Value, String> {
-    mihomo_get_json_value(&[
-        "/v1/connections",
-        "/connections",
-    ])
-    .await
+    mihomo_get_json_value(&["/v1/connections", "/connections"]).await
 }
 
 #[tauri::command]
 pub async fn mihomo_get_delay(proxy_name: String) -> Result<serde_json::Value, String> {
     let encoded = urlencoding::encode(&proxy_name);
-    let p1 = format!(
-        "/v1/proxies/{}/delay?timeout=5000&url=https%3A%2F%2F1.1.1.1",
-        encoded
-    );
-    let p2 = format!(
-        "/proxies/{}/delay?timeout=5000&url=https%3A%2F%2F1.1.1.1",
-        encoded
-    );
-
+    let p1 = format!("/v1/proxies/{}/delay?timeout=5000&url=https%3A%2F%2F1.1.1.1", encoded);
+    let p2 = format!("/proxies/{}/delay?timeout=5000&url=https%3A%2F%2F1.1.1.1", encoded);
     mihomo_get_json(&[p1.as_str(), p2.as_str()]).await
 }
 
+// Оптимизация парсинга ping
+#[inline]
 fn parse_ping_ms(output: &str) -> Option<u32> {
     let lower = output.to_lowercase();
-    for marker in ["time=", "time<", "время=", "время<"] {
+    const MARKERS: &[&str] = &["time=", "time<", "время=", "время<"];
+    
+    for marker in MARKERS {
         if let Some(idx) = lower.find(marker) {
             let rest = &lower[idx + marker.len()..];
-            let digits: String = rest.chars().skip_while(|c| !c.is_ascii_digit()).take_while(|c| c.is_ascii_digit()).collect();
+            let digits: String = rest
+                .chars()
+                .skip_while(|c| !c.is_ascii_digit())
+                .take_while(|c| c.is_ascii_digit())
+                .collect();
             if let Ok(v) = digits.parse::<u32>() {
                 return Some(v.max(1));
             }
@@ -381,33 +355,29 @@ fn parse_ping_ms(output: &str) -> Option<u32> {
 
 #[tauri::command(rename_all = "camelCase")]
 pub async fn ping_host(host: String) -> Result<Option<u32>, String> {
-    let host = host.trim().to_string();
-    if host.is_empty() {
-        return Ok(None);
-    }
-    if host.chars().any(|c| c.is_whitespace()) {
+    let host = host.trim();
+    if host.is_empty() || host.chars().any(|c| c.is_whitespace()) {
         return Err("Invalid host".to_string());
     }
 
     let mut cmd = if cfg!(target_os = "windows") {
         let mut c = Command::new("ping");
-        c.args(["-n", "1", "-w", "1000", &host]);
+        c.args(["-n", "1", "-w", "1000", host]);
         c
     } else {
         let mut c = Command::new("ping");
-        c.args(["-c", "1", "-W", "1", &host]);
+        c.args(["-c", "1", "-W", "1", host]);
         c
     };
 
     #[cfg(target_os = "windows")]
     {
-        // CREATE_NO_WINDOW
         cmd.creation_flags(0x08000000);
     }
 
     let out = cmd.output().map_err(|e| format!("Failed to run ping: {e}"))?;
-    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
     let combined = format!("{}\n{}", stdout, stderr);
 
     Ok(parse_ping_ms(&combined))
@@ -452,7 +422,6 @@ fn primary_config_dir(app: &AppHandle) -> PathBuf {
 
 fn all_config_dirs(app: &AppHandle) -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = Vec::new();
-
     let primary = primary_config_dir(app);
     dirs.push(primary.clone());
 
@@ -481,13 +450,10 @@ fn all_config_dirs(app: &AppHandle) -> Vec<PathBuf> {
 }
 
 fn find_existing_config_path(app: &AppHandle, filename: &str) -> Option<PathBuf> {
-    for dir in all_config_dirs(app) {
-        let p = dir.join(filename);
-        if p.exists() {
-            return Some(p);
-        }
-    }
-    None
+    all_config_dirs(app)
+        .iter()
+        .map(|dir| dir.join(filename))
+        .find(|p| p.exists())
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -542,6 +508,7 @@ pub fn parse_config(config_content: String) -> Result<ParsedConfig, String> {
 
     let mut rules = Vec::new();
     if let Some(rule_list) = yaml.get("rules").and_then(|r| r.as_sequence()) {
+        rules.reserve(rule_list.len());
         for (idx, rule) in rule_list.iter().enumerate() {
             if let Some(rule_str) = rule.as_str() {
                 if let Some(parsed) = parse_rule_string(rule_str, idx) {
@@ -569,21 +536,18 @@ fn parse_rule_string(rule_str: &str, _idx: usize) -> Option<ParsedRule> {
     }
 
     let rule_type_str = parts[0].trim();
-    let target = parts[1].trim().to_string();
-    let action = parts[2].trim().to_string();
-
     if rule_type_str == "MATCH" {
         return None;
     }
-    
+
+    let target = parts[1].trim().to_string();
+    let action = parts[2].trim().to_string();
 
     let rule_type = match rule_type_str {
         "PROCESS-NAME" => "process",
-        "DOMAIN" => "domain",
-        "DOMAIN-SUFFIX" => "domain",
+        "DOMAIN" | "DOMAIN-SUFFIX" => "domain",
         "DOMAIN-KEYWORD" => "domain_keyword",
-        "IP-CIDR" | "IP-CIDR6" => "ip",
-        "GEOIP" => "ip",
+        "IP-CIDR" | "IP-CIDR6" | "GEOIP" => "ip",
         _ => "other",
     }.to_string();
 
@@ -609,15 +573,16 @@ pub fn generate_config(
         .map_err(|e| format!("Failed to parse YAML: {}", e))?;
 
     yaml["log-level"] = serde_yaml::Value::String(log_level.to_lowercase());
-    // ... (rest of the code remains the same)
 
     let mut profile = serde_yaml::Mapping::new();
     profile.insert("store-selected".into(), serde_yaml::Value::Bool(true));
     yaml["profile"] = serde_yaml::Value::Mapping(profile);
     
     if !user_rules.is_empty() {
-        let mut rules = Vec::new();
+        let mut rules = Vec::with_capacity(user_rules.len() + 1);
+        let mut any_active = false;
         for rule in user_rules.iter().filter(|r| r.active) {
+            any_active = true;
             let target = if rule.rule == "Via VPN" { "PROXY" } else { "DIRECT" };
             let rule_str = match rule.rule_type.as_str() {
                 "process" => format!("PROCESS-NAME,{},{}", rule.app, target),
@@ -629,32 +594,22 @@ pub fn generate_config(
             rules.push(serde_yaml::Value::String(rule_str));
         }
 
-        rules.push(serde_yaml::Value::String("MATCH,PROXY".to_string()));
-
+        rules.push(serde_yaml::Value::String(
+            if any_active { "MATCH,DIRECT" } else { "MATCH,PROXY" }.to_string(),
+        ));
         yaml["rules"] = serde_yaml::Value::Sequence(rules);
     }
 
-    // Keep existing tun config if present, only toggle enable + optional MTU.
     let mut tun = serde_yaml::Mapping::new();
     tun.insert("enable".into(), serde_yaml::Value::Bool(enable_tun));
     if let Some(mtu) = mtu {
-        tun.insert(
-            "mtu".into(),
-            serde_yaml::Value::Number(serde_yaml::Number::from(mtu)),
-        );
+        tun.insert("mtu".into(), serde_yaml::Value::Number(serde_yaml::Number::from(mtu)));
     }
-
-    tun.insert(
-        "auto-detect-interface".into(),
-        serde_yaml::Value::Bool(true),
-    );
+    tun.insert("auto-detect-interface".into(), serde_yaml::Value::Bool(true));
     tun.insert("stack".into(), serde_yaml::Value::String("gvisor".to_string()));
     tun.insert("auto-route".into(), serde_yaml::Value::Bool(true));
     tun.insert("device".into(), serde_yaml::Value::String("Mihomo".to_string()));
-    tun.insert(
-        "dns-hijack".into(),
-        serde_yaml::Value::Sequence(vec![serde_yaml::Value::String("any:53".to_string())]),
-    );
+    tun.insert("dns-hijack".into(), serde_yaml::Value::Sequence(vec![serde_yaml::Value::String("any:53".to_string())]));
     yaml["tun"] = serde_yaml::Value::Mapping(tun);
 
     serde_yaml::to_string(&yaml).map_err(|e| format!("Failed to serialize YAML: {}", e))
@@ -671,11 +626,13 @@ pub async fn import_config(app: AppHandle, config_content: String, filename: Str
         Ok(mut yaml) => {
             let mut did_rewrite = false;
             if let Some(seq) = yaml.get_mut("rules").and_then(|r| r.as_sequence_mut()) {
-                if let Some(last) = seq.last_mut() {
-                    if let Some(s) = last.as_str() {
-                        if s.trim() == "MATCH,DIRECT" {
-                            *last = serde_yaml::Value::String("MATCH,PROXY".to_string());
-                            did_rewrite = true;
+                if seq.len() == 1 {
+                    if let Some(only) = seq.first_mut() {
+                        if let Some(s) = only.as_str() {
+                            if s.trim() == "MATCH,DIRECT" {
+                                *only = serde_yaml::Value::String("MATCH,PROXY".to_string());
+                                did_rewrite = true;
+                            }
                         }
                     }
                 }
@@ -695,6 +652,28 @@ pub async fn import_config(app: AppHandle, config_content: String, filename: Str
     Ok(config_path.to_string_lossy().to_string())
 }
 
+fn build_rules_from_user_rules(user_rules: &[UserRule]) -> Vec<serde_yaml::Value> {
+    let mut rules = Vec::with_capacity(user_rules.len() + 1);
+    let mut any_active = false;
+    for rule in user_rules.iter().filter(|r| r.active) {
+        any_active = true;
+        let target = if rule.rule == "Via VPN" { "PROXY" } else { "DIRECT" };
+        let rule_str = match rule.rule_type.as_str() {
+            "process" => format!("PROCESS-NAME,{},{}", rule.app, target),
+            "domain" => format!("DOMAIN,{},{}", rule.app, target),
+            "domain_keyword" => format!("DOMAIN-KEYWORD,{},{}", rule.app, target),
+            "ip" => format!("IP-CIDR,{}/32,{}", rule.app, target),
+            _ => format!("PROCESS-NAME,{},{}", rule.app, target),
+        };
+        rules.push(serde_yaml::Value::String(rule_str));
+    }
+
+    rules.push(serde_yaml::Value::String(
+        if any_active { "MATCH,DIRECT" } else { "MATCH,PROXY" }.to_string(),
+    ));
+    rules
+}
+
 #[tauri::command(rename_all = "camelCase")]
 pub async fn save_rules_to_config(app: AppHandle, filename: String, user_rules: Vec<UserRule>) -> Result<(), String> {
     if user_rules.is_empty() {
@@ -709,25 +688,11 @@ pub async fn save_rules_to_config(app: AppHandle, filename: String, user_rules: 
     let mut yaml: serde_yaml::Value = serde_yaml::from_str(&content)
         .map_err(|e| format!("Failed to parse YAML: {}", e))?;
 
-    let mut rules = Vec::new();
-    for rule in user_rules.iter().filter(|r| r.active) {
-        let target = if rule.rule == "Via VPN" { "PROXY" } else { "DIRECT" };
-        let rule_str = match rule.rule_type.as_str() {
-            "process" => format!("PROCESS-NAME,{},{}", rule.app, target),
-            "domain" => format!("DOMAIN,{},{}", rule.app, target),
-            "domain_keyword" => format!("DOMAIN-KEYWORD,{},{}", rule.app, target),
-            "ip" => format!("IP-CIDR,{}/32,{}", rule.app, target),
-            _ => format!("PROCESS-NAME,{},{}", rule.app, target),
-        };
-        rules.push(serde_yaml::Value::String(rule_str));
-    }
-
-    rules.push(serde_yaml::Value::String("MATCH,PROXY".to_string()));
-
-    yaml["rules"] = serde_yaml::Value::Sequence(rules);
+    yaml["rules"] = serde_yaml::Value::Sequence(build_rules_from_user_rules(&user_rules));
 
     let new_content = serde_yaml::to_string(&yaml)
         .map_err(|e| format!("Failed to serialize YAML: {}", e))?;
+
     fs::write(&config_path, new_content)
         .map_err(|e| format!("Failed to write config: {}", e))?;
     Ok(())
@@ -740,29 +705,12 @@ pub async fn save_rules_to_path(path: String, user_rules: Vec<UserRule>) -> Resu
     }
 
     let config_path = PathBuf::from(path);
-
     let content = fs::read_to_string(&config_path)
         .map_err(|e| format!("Failed to read config: {}", e))?;
-    // ... (rest of the code remains the same)
     let mut yaml: serde_yaml::Value = serde_yaml::from_str(&content)
         .map_err(|e| format!("Failed to parse YAML: {}", e))?;
 
-    let mut rules = Vec::new();
-    for rule in user_rules.iter().filter(|r| r.active) {
-        let target = if rule.rule == "Via VPN" { "PROXY" } else { "DIRECT" };
-        let rule_str = match rule.rule_type.as_str() {
-            "process" => format!("PROCESS-NAME,{},{}", rule.app, target),
-            "domain" => format!("DOMAIN,{},{}", rule.app, target),
-            "domain_keyword" => format!("DOMAIN-KEYWORD,{},{}", rule.app, target),
-            "ip" => format!("IP-CIDR,{}/32,{}", rule.app, target),
-            _ => format!("PROCESS-NAME,{},{}", rule.app, target),
-        };
-        rules.push(serde_yaml::Value::String(rule_str));
-    }
-
-    rules.push(serde_yaml::Value::String("MATCH,PROXY".to_string()));
-
-    yaml["rules"] = serde_yaml::Value::Sequence(rules);
+    yaml["rules"] = serde_yaml::Value::Sequence(build_rules_from_user_rules(&user_rules));
 
     let new_content = serde_yaml::to_string(&yaml)
         .map_err(|e| format!("Failed to serialize YAML: {}", e))?;
@@ -779,10 +727,8 @@ pub fn export_config_to_path(app: AppHandle, filename: String, path: String) -> 
     let content = fs::read_to_string(&src_path)
         .map_err(|e| format!("Failed to read config {}: {}", filename, e))?;
 
-    let dst_path = PathBuf::from(path);
-    fs::write(&dst_path, content)
-        .map_err(|e| format!("Failed to export config to {:?}: {}", dst_path, e))?;
-    Ok(())
+    fs::write(PathBuf::from(path), content)
+        .map_err(|e| format!("Failed to export config: {}", e))
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -799,11 +745,12 @@ pub async fn start_vpn(
         }
     }
 
-    let _ = enable_tun;
-    // Убиваем все существующие процессы mihomo
+    #[cfg(target_os = "windows")]
+    {
+        let _ = enable_tun;
+    }
+
     kill_existing_mihomo();
-    
-    // Небольшая задержка для завершения процессов
     thread::sleep(std::time::Duration::from_millis(500));
     
     let mut process_guard = MIHOMO_PROCESS.lock().map_err(|e| e.to_string())?;
@@ -811,6 +758,7 @@ pub async fn start_vpn(
     if let Some(mut child) = process_guard.take() {
         let _ = child.kill();
         let _ = child.wait();
+    // ... (rest of the code remains the same)
     }
 
     let mihomo_path = get_mihomo_path(&app);
@@ -845,7 +793,6 @@ pub async fn start_vpn(
 
     #[cfg(target_os = "windows")]
     {
-        // CREATE_NO_WINDOW
         cmd.creation_flags(0x08000000);
     }
 
@@ -878,35 +825,30 @@ fn spawn_log_reader(
     log_path: PathBuf,
 ) {
     thread::spawn(move || {
-        let log_file = std::fs::OpenOptions::new()
+        let mut log_file = match std::fs::OpenOptions::new()
             .create(true)
             .append(true)
-            .open(&log_path);
-
-        if log_file.is_err() {
-            eprintln!("Failed to open log file");
-            return;
-        }
-
-        let mut log_file = log_file.unwrap();
+            .open(&log_path) {
+            Ok(f) => f,
+            Err(_) => {
+                eprintln!("Failed to open log file");
+                return;
+            }
+        };
 
         if let Some(stdout) = stdout {
             let reader = BufReader::new(stdout);
-            for line in reader.lines() {
-                if let Ok(line) = line {
-                    let _ = writeln!(log_file, "{}", line);
-                    let _ = log_file.flush();
-                }
+            for line in reader.lines().flatten() {
+                let _ = writeln!(log_file, "{}", line);
+                let _ = log_file.flush();
             }
         }
 
         if let Some(stderr) = stderr {
             let reader = BufReader::new(stderr);
-            for line in reader.lines() {
-                if let Ok(line) = line {
-                    let _ = writeln!(log_file, "{}", line);
-                    let _ = log_file.flush();
-                }
+            for line in reader.lines().flatten() {
+                let _ = writeln!(log_file, "{}", line);
+                let _ = log_file.flush();
             }
         }
     });
@@ -921,7 +863,6 @@ pub async fn stop_vpn() -> Result<VpnStatus, String> {
         let _ = child.wait();
     }
     
-    // Дополнительная проверка на случай зависших процессов
     kill_existing_mihomo();
 
     Ok(VpnStatus {
@@ -958,7 +899,7 @@ pub fn get_mihomo_logs(app: AppHandle) -> Result<Vec<LogEntry>, String> {
     let content = fs::read_to_string(&log_path)
         .map_err(|e| format!("Failed to read logs: {}", e))?;
 
-    let mut logs = Vec::new();
+    let mut logs = Vec::with_capacity(200);
     for line in content.lines().rev().take(200) {
         if line.trim().is_empty() {
             continue;
@@ -988,11 +929,9 @@ pub fn clear_mihomo_logs(app: AppHandle) -> Result<(), String> {
     let config_dir = primary_config_dir(&app);
     let log_path = config_dir.join("mihomo.log");
 
-    if !log_path.exists() {
-        return Ok(());
+    if log_path.exists() {
+        fs::write(&log_path, "").map_err(|e| format!("Failed to clear logs: {}", e))?;
     }
-
-    fs::write(&log_path, "").map_err(|e| format!("Failed to clear logs: {}", e))?;
     Ok(())
 }
 

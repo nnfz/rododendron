@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import { LuChevronRight, LuDownload, LuFileText, LuHelpCircle, LuRefreshCw, LuUpload, LuTrash2 } from 'react-icons/lu';
 import CustomSelect from './CustomSelect';
 import { useI18n } from '../i18n';
@@ -30,7 +30,13 @@ type UpdateCheckResult = {
   release_notes?: string | null;
 };
 
-function SettingsPage({ 
+const MTU_MIN = 1280;
+const MTU_MAX = 1500;
+const MTU_DEFAULT = '1500';
+const DELETE_CONFIRM_TIMEOUT = 3000;
+const MIHOMO_CORE_VERSION = '1.19.18';
+
+function SettingsPage({
   setShowLogsModal,
   configs,
   setConfigs,
@@ -43,15 +49,17 @@ function SettingsPage({
 }: SettingsPageProps) {
   const { t, language, setLanguage } = useI18n();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const deleteConfirmTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [mtuError, setMtuError] = useState(false);
-
   const [updateCheck, setUpdateCheck] = useState<UpdateCheckResult | null>(null);
   const [updateStatusText, setUpdateStatusText] = useState<string | null>(null);
   const [isCheckingUpdates, setIsCheckingUpdates] = useState(false);
   const [isInstallingUpdate, setIsInstallingUpdate] = useState(false);
-
   const [mihomoCoreName, setMihomoCoreName] = useState<string>('mihomo');
+  const [vlessImportError, setVlessImportError] = useState<string | null>(null);
+  const [isImportingVless, setIsImportingVless] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -75,6 +83,14 @@ function SettingsPage({
     };
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (deleteConfirmTimeoutRef.current) {
+        clearTimeout(deleteConfirmTimeoutRef.current);
+      }
+    };
+  }, []);
+
   const toggleSetting = useCallback(async (key: keyof Settings) => {
     try {
       let nextValue = false;
@@ -82,21 +98,18 @@ function SettingsPage({
         nextValue = !prev[key];
         return { ...prev, [key]: nextValue };
       });
-      
-      // If VPN is running and this setting requires a restart, restart the VPN
+
       const settingsRequiringRestart: (keyof Settings)[] = ['enableTun', 'killSwitch'];
       if (vpnEnabled && settingsRequiringRestart.includes(key)) {
         try {
           await restartVPN();
         } catch (e) {
           console.error('Failed to restart VPN:', e);
-          // Revert the setting if restart fails
           setSettings(prev => ({ ...prev, [key]: !nextValue }));
         }
       }
     } catch (e) {
       console.error('Error toggling setting:', e);
-      // Revert the setting if there was an error
       setSettings(prev => ({ ...prev, [key]: prev[key] }));
     }
   }, [setSettings, vpnEnabled, restartVPN]);
@@ -121,7 +134,7 @@ function SettingsPage({
       }
 
       if (!res?.asset_name) {
-        setUpdateStatusText(`${t.settings.updateError}: no .exe`);
+        setUpdateStatusText(`${t.settings.updateError}: no asset`);
         return;
       }
 
@@ -132,15 +145,11 @@ function SettingsPage({
     } finally {
       setIsCheckingUpdates(false);
     }
-  }, [t.settings.checkingUpdates, t.settings.upToDate, t.settings.updateAvailable, t.settings.updateError]);
+  }, [t.settings]);
 
   const handleInstallUpdate = useCallback(async () => {
-    if (!isTauri()) {
+    if (!isTauri() || !updateCheck?.update_available) {
       setUpdateStatusText(t.settings.updateError);
-      return;
-    }
-
-    if (!updateCheck?.update_available) {
       return;
     }
 
@@ -154,19 +163,19 @@ function SettingsPage({
       setUpdateStatusText(t.settings.updateError);
       setIsInstallingUpdate(false);
     }
-  }, [t.settings.installingUpdate, t.settings.updateError, updateCheck?.update_available]);
+  }, [t.settings, updateCheck?.update_available]);
 
   const handleMtuChange = useCallback(async (value: string) => {
     const numValue = parseInt(value, 10);
-    
-    if (value && (numValue < 1280 || numValue > 1500)) {
+
+    if (value && (numValue < MTU_MIN || numValue > MTU_MAX)) {
       setMtuError(true);
       setTimeout(() => setMtuError(false), 400);
       return;
     }
-    
+
     setSettings(prev => ({ ...prev, mtu: value }));
-    
+
     if (vpnEnabled && value) {
       await new Promise(resolve => setTimeout(resolve, 100));
       await restartVPN();
@@ -176,30 +185,127 @@ function SettingsPage({
   const handleImportConfig = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    
+
     const content = await file.text();
     const filename = file.name;
-    
+
     if (isTauri()) {
       try {
         const { invoke } = await import('@tauri-apps/api/core');
         await invoke('import_config', { configContent: content, filename });
-        
+
         const newConfig: Config = {
           id: `config-${Date.now()}-${filename}`,
           name: filename.replace(/\.(yaml|yml)$/, ''),
           filename,
         };
-        
+
         setConfigs(prev => [...prev, newConfig]);
         setActiveConfigId(newConfig.id);
       } catch (e) {
         console.error('Failed to import config:', e);
       }
     }
-    
+
     if (fileInputRef.current) fileInputRef.current.value = '';
   }, [setConfigs, setActiveConfigId]);
+
+  const importVlessFromText = useCallback(async (raw: string) => {
+    if (!isTauri()) return;
+    const text = raw.trim();
+    if (!text) return;
+
+    const url = new URL(text);
+    if (url.protocol !== 'vless:') {
+      throw new Error('Clipboard does not contain a vless:// link');
+    }
+    if (!url.username) {
+      throw new Error('Missing UUID in vless:// link');
+    }
+
+    const name = decodeURIComponent((url.hash || '').replace(/^#/, '')).trim() || 'VLESS';
+    const server = url.hostname;
+    const port = url.port ? Number(url.port) : 443;
+
+    const network = (url.searchParams.get('type') || 'tcp').toLowerCase();
+    const security = (url.searchParams.get('security') || '').toLowerCase();
+    const pbk = url.searchParams.get('pbk') || '';
+    const fp = url.searchParams.get('fp') || '';
+    const sni = url.searchParams.get('sni') || '';
+    const sid = url.searchParams.get('sid') || '';
+    const flow = url.searchParams.get('flow') || '';
+
+    const tlsEnabled = security === 'reality' || security === 'tls';
+
+    const safeName = name.replace(/[\\/:*?"<>|]+/g, '-').slice(0, 60) || 'VLESS';
+    const filename = `${safeName}.yaml`;
+
+    const yaml = [
+      'mixed-port: 7890',
+      'allow-lan: false',
+      'mode: rule',
+      'log-level: info',
+      '',
+      'proxies:',
+      `  - name: ${name}`,
+      '    type: vless',
+      `    server: ${server}`,
+      `    port: ${port}`,
+      `    uuid: ${url.username}`,
+      '    udp: true',
+      `    network: ${network}`,
+      '',
+      `    tls: ${tlsEnabled ? 'true' : 'false'}`,
+      ...(sni ? [`    servername: ${sni}`] : []),
+      ...(fp ? [`    client-fingerprint: ${fp}`] : []),
+      ...(flow ? [`    flow: ${flow}`] : []),
+      '',
+      ...(security === 'reality'
+        ? [
+          '    reality-opts:',
+          ...(pbk ? [`      public-key: ${pbk}`] : []),
+          ...(sid ? [`      short-id: ${sid}`] : []),
+        ]
+        : []),
+      '',
+      'proxy-groups:',
+      '  - name: PROXY',
+      '    type: select',
+      '    proxies:',
+      `      - ${name}`,
+      '      - DIRECT',
+      '',
+      'rules:',
+      '- MATCH,PROXY',
+      '',
+    ].join('\n');
+
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('import_config', { configContent: yaml, filename });
+
+    const newConfig: Config = {
+      id: `config-${Date.now()}-${filename}`,
+      name: filename.replace(/\.(yaml|yml)$/, ''),
+      filename,
+    };
+    setConfigs(prev => [...prev, newConfig]);
+    setActiveConfigId(newConfig.id);
+  }, [setConfigs, setActiveConfigId]);
+
+  const handleImportVlessFromClipboard = useCallback(async () => {
+    if (!isTauri()) return;
+
+    setVlessImportError(null);
+    setIsImportingVless(true);
+    try {
+      const text = await navigator.clipboard.readText();
+      await importVlessFromText(text);
+    } catch (e) {
+      setVlessImportError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setIsImportingVless(false);
+    }
+  }, [importVlessFromText]);
 
   const handleExportConfig = useCallback(async () => {
     if (!activeConfigId || !isTauri()) return;
@@ -225,14 +331,14 @@ function SettingsPage({
 
   const handleDeleteConfig = useCallback(async () => {
     if (!activeConfigId || !isTauri()) return;
-    
+
     const config = configs.find(c => c.id === activeConfigId);
     if (!config) return;
 
     try {
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('delete_config', { filename: config.filename });
-      
+
       const newConfigs = configs.filter(c => c.id !== activeConfigId);
       setConfigs(newConfigs);
       setActiveConfigId(newConfigs[0]?.id || '');
@@ -246,9 +352,19 @@ function SettingsPage({
     if (!showDeleteConfirm) {
       setShowDeleteConfirm(true);
 
-      
-      setTimeout(() => setShowDeleteConfirm(false), 3000);
+      if (deleteConfirmTimeoutRef.current) {
+        clearTimeout(deleteConfirmTimeoutRef.current);
+      }
+
+      deleteConfirmTimeoutRef.current = setTimeout(() => {
+        setShowDeleteConfirm(false);
+        deleteConfirmTimeoutRef.current = null;
+      }, DELETE_CONFIRM_TIMEOUT);
     } else {
+      if (deleteConfirmTimeoutRef.current) {
+        clearTimeout(deleteConfirmTimeoutRef.current);
+        deleteConfirmTimeoutRef.current = null;
+      }
       handleDeleteConfig();
     }
   }, [showDeleteConfirm, handleDeleteConfig]);
@@ -256,6 +372,21 @@ function SettingsPage({
   const handleLanguageChange = useCallback((lang: Language) => {
     setLanguage(lang);
   }, [setLanguage]);
+
+  const configOptions = useMemo(() =>
+    configs.map(c => ({ value: c.id, label: c.name })),
+    [configs]
+  );
+
+  const closeBehaviorOptions = useMemo(() => [
+    { value: 'tray', label: t.settings.closeToTray },
+    { value: 'exit', label: t.settings.closeExit },
+  ], [t.settings]);
+
+  const mihomoCoreDisplayName = useMemo(() => {
+    const base = mihomoCoreName.replace(/\.[^./\\]+$/, '');
+    return `${base} (${MIHOMO_CORE_VERSION})`;
+  }, [mihomoCoreName]);
 
   return (
     <div className="page-content">
@@ -268,17 +399,28 @@ function SettingsPage({
           <div className="panel">
             <div className="panel-row disabled">
               <span className="setting-label">{t.settings.activeConfig}</span>
-              <CustomSelect 
-                value={activeConfigId} 
-                onChange={setActiveConfigId} 
-                options={configs.map(c => ({ value: c.id, label: c.name }))} 
-                disabled={configs.length === 0} 
-              />
+              <div className='setting-top'>
+                <button
+                  type="button"
+                  onClick={handleImportVlessFromClipboard}
+                  className="btn btn-ghost-dark"
+                  disabled={isImportingVless}
+                >
+                  <LuUpload size={18} />
+                  <span className="setting-label">{t.settings.importurl}</span>
+                </button>
+                <CustomSelect
+                  value={activeConfigId}
+                  onChange={setActiveConfigId}
+                  options={configOptions}
+                  disabled={configs.length === 0}
+                />
+              </div>
             </div>
             <div className="config-actions">
-              <button 
-                onClick={handleDeleteClick} 
-                className="config-action-btn config-delete-btn" 
+              <button
+                onClick={handleDeleteClick}
+                className="config-action-btn config-delete-btn"
                 disabled={!activeConfigId}
               >
                 <LuTrash2 size={18} />
@@ -286,15 +428,15 @@ function SettingsPage({
                   {showDeleteConfirm ? t.settings.confirmDelete || 'Confirm?' : t.settings.deleteConfig}
                 </span>
               </button>
-              <button 
-                onClick={() => fileInputRef.current?.click()} 
+              <button
+                onClick={() => fileInputRef.current?.click()}
                 className="config-action-btn config-import-btn"
               >
                 <LuUpload size={18} />
                 <span className="setting-label import-label">{t.settings.importConfig}</span>
               </button>
-              <button 
-                onClick={handleExportConfig} 
+              <button
+                onClick={handleExportConfig}
                 className="config-action-btn"
                 disabled={!activeConfigId}
               >
@@ -302,13 +444,19 @@ function SettingsPage({
                 <span className="setting-label">{t.settings.exportConfig}</span>
               </button>
             </div>
-            <input 
-              ref={fileInputRef} 
-              type="file" 
-              accept=".yaml,.yml" 
-              onChange={handleImportConfig} 
-              style={{ display: 'none' }} 
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".yaml,.yml"
+              onChange={handleImportConfig}
+              style={{ display: 'none' }}
             />
+
+            {vlessImportError && (
+              <div className="panel-row disabled">
+                <span className="setting-label">{vlessImportError}</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -340,10 +488,7 @@ function SettingsPage({
               <CustomSelect
                 value={settings.closeBehavior}
                 onChange={(value) => setSettings(prev => ({ ...prev, closeBehavior: value as Settings['closeBehavior'] }))}
-                options={[
-                  { value: 'tray', label: t.settings.closeToTray },
-                  { value: 'exit', label: t.settings.closeExit },
-                ]}
+                options={closeBehaviorOptions}
               />
             </div>
 
@@ -411,15 +556,15 @@ function SettingsPage({
                   <span className="help-tooltip-content">{t.settings.mtuHelp}</span>
                 </button>
               </span>
-              <input 
-                type="number" 
-                min="1280"
-                max="1500"
-                value={settings.mtu} 
-                onChange={e => handleMtuChange(e.target.value.replace(/\D/g, ''))} 
+              <input
+                type="number"
+                min={MTU_MIN}
+                max={MTU_MAX}
+                value={settings.mtu}
+                onChange={e => handleMtuChange(e.target.value.replace(/\D/g, ''))}
                 onBlur={() => {
                   if (!settings.mtu) {
-                    setSettings(prev => ({ ...prev, mtu: '1500' }));
+                    setSettings(prev => ({ ...prev, mtu: MTU_DEFAULT }));
                   }
                 }}
                 className={`input ${mtuError ? 'input-error input-shake' : ''}`}
@@ -452,7 +597,7 @@ function SettingsPage({
             </div>
             <div className="panel-row disabled">
               <span className="setting-label">{t.settings.versioncore}</span>
-              <span className="setting-value">{mihomoCoreName}</span>
+              <span className="setting-value">{mihomoCoreDisplayName}</span>
             </div>
 
             <div className="config-actions">
@@ -465,7 +610,7 @@ function SettingsPage({
                 <span className="setting-label">{t.settings.checkUpdates}</span>
               </button>
 
-              {updateCheck?.update_available ? (
+              {updateCheck?.update_available && (
                 <button
                   onClick={handleInstallUpdate}
                   className="config-action-btn"
@@ -474,15 +619,14 @@ function SettingsPage({
                   <LuDownload size={18} />
                   <span className="setting-label">{t.settings.updateNow}</span>
                 </button>
-              ) : null}
+              )}
             </div>
 
-            {updateStatusText ? (
+            {updateStatusText && (
               <div className="panel-row disabled">
                 <span className="setting-label">{updateStatusText}</span>
-                <span className="setting-value"></span>
               </div>
-            ) : null}
+            )}
           </div>
         </div>
       </div>
@@ -490,4 +634,4 @@ function SettingsPage({
   );
 }
 
-export default React.memo(SettingsPage);
+export default memo(SettingsPage);

@@ -9,6 +9,9 @@ use crate::mihomo;
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
+const USER_AGENT_VALUE: &str = "rododendron";
+const GITHUB_API_URL: &str = "https://api.github.com/repos/nnfz/rododendron/releases/latest";
+
 #[derive(Debug, Deserialize)]
 struct GitHubRelease {
     tag_name: String,
@@ -32,11 +35,14 @@ pub struct UpdateCheckResult {
     pub release_notes: Option<String>,
 }
 
+#[inline]
 fn normalize_tag_to_version(tag: &str) -> String {
-    let t = tag.trim();
-    let t = t.strip_prefix("app-v").unwrap_or(t);
-    let t = t.strip_prefix('v').unwrap_or(t);
-    t.trim().to_string()
+    tag.trim()
+        .strip_prefix("app-v")
+        .or_else(|| tag.strip_prefix('v'))
+        .unwrap_or(tag)
+        .trim()
+        .to_string()
 }
 
 fn parse_version_triplet(v: &str) -> Option<(u64, u64, u64)> {
@@ -52,6 +58,7 @@ fn parse_version_triplet(v: &str) -> Option<(u64, u64, u64)> {
     Some((a, b, c))
 }
 
+#[inline]
 fn is_newer_version(current: &str, latest: &str) -> Option<bool> {
     let c = parse_version_triplet(current)?;
     let l = parse_version_triplet(latest)?;
@@ -67,12 +74,9 @@ fn select_platform_asset(assets: &[GitHubAsset]) -> Option<&GitHubAsset> {
 
 #[cfg(target_os = "macos")]
 fn select_platform_asset(assets: &[GitHubAsset]) -> Option<&GitHubAsset> {
-    let prefer = [".dmg", ".zip"];
-    for ext in prefer {
-        if let Some(a) = assets
-            .iter()
-            .find(|x| x.name.to_ascii_lowercase().ends_with(ext))
-        {
+    const PREFER: &[&str] = &[".dmg", ".zip"];
+    for &ext in PREFER {
+        if let Some(a) = assets.iter().find(|x| x.name.to_ascii_lowercase().ends_with(ext)) {
             return Some(a);
         }
     }
@@ -81,12 +85,9 @@ fn select_platform_asset(assets: &[GitHubAsset]) -> Option<&GitHubAsset> {
 
 #[cfg(target_os = "linux")]
 fn select_platform_asset(assets: &[GitHubAsset]) -> Option<&GitHubAsset> {
-    let prefer = [".appimage", ".deb", ".tar.gz", ".zip"];
-    for ext in prefer {
-        if let Some(a) = assets
-            .iter()
-            .find(|x| x.name.to_ascii_lowercase().ends_with(ext))
-        {
+    const PREFER: &[&str] = &[".appimage", ".deb", ".tar.gz", ".zip"];
+    for &ext in PREFER {
+        if let Some(a) = assets.iter().find(|x| x.name.to_ascii_lowercase().ends_with(ext)) {
             return Some(a);
         }
     }
@@ -96,8 +97,8 @@ fn select_platform_asset(assets: &[GitHubAsset]) -> Option<&GitHubAsset> {
 async fn fetch_latest_release() -> Result<GitHubRelease, String> {
     let client = reqwest::Client::new();
     client
-        .get("https://api.github.com/repos/nnfz/rododendron/releases/latest")
-        .header(USER_AGENT, "rododendron")
+        .get(GITHUB_API_URL)
+        .header(USER_AGENT, USER_AGENT_VALUE)
         .header(ACCEPT, "application/vnd.github+json")
         .send()
         .await
@@ -155,7 +156,7 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
     let client = reqwest::Client::new();
     let bytes = client
         .get(&asset.browser_download_url)
-        .header(USER_AGENT, "rododendron")
+        .header(USER_AGENT, USER_AGENT_VALUE)
         .header(ACCEPT, "application/octet-stream")
         .send()
         .await

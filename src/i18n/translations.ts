@@ -69,6 +69,7 @@ export type Translations = {
     snowfall: string;
     logs: string;
     mainSettings: string;
+    importurl: string;
     autoConnect: string;
     autoLaunch: string;
     enableTun: string;
@@ -185,6 +186,7 @@ export const translations: Record<Language, Translations> = {
       interfaceLanguage: 'Interface language',
       logsAndDiagnostics: 'Logs and diagnostics',
       logs: 'Logs',
+      importurl: 'Import from clipboard',
       importConfig: 'Import configuration',
       exportConfig: 'Export configuration',
       deleteConfig: 'Delete configuration',
@@ -305,6 +307,7 @@ export const translations: Record<Language, Translations> = {
       importConfig: 'Импорт конфигурации',
       exportConfig: 'Экспорт конфигурации',
       deleteConfig: 'Удалить конфигурацию',
+      importurl: 'Вставить из буфера обмена',
       interfaceLanguage: 'Язык интерфейса',
       logsAndDiagnostics: 'Логи и диагностика',
       enableTun: 'Включить TUN',
@@ -426,6 +429,7 @@ export const translations: Record<Language, Translations> = {
       importConfig: 'Імпарт канфігурацыі',
       exportConfig: 'Экспарт канфігурацыі',
       deleteConfig: 'Выдаліць канфігурацыю',
+      importurl: 'Уставіць з буфера абмену',
       enableTun: 'Уключыць TUN',
       logs: 'Логі',
       confirmDelete: 'Вы ўпэўнены?',

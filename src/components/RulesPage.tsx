@@ -1,4 +1,4 @@
-import { memo, useEffect, useState, useCallback, type Dispatch, type SetStateAction } from 'react';
+import { memo, useEffect, useState, useCallback, useMemo, type Dispatch, type SetStateAction } from 'react';
 import { LuPlus, LuTrash2, LuSearch, LuMonitor, LuGlobe, LuHash, LuX, LuHelpCircle } from 'react-icons/lu';
 import { useI18n } from '../i18n';
 import type { Rule } from '../types';
@@ -15,6 +15,30 @@ interface RulesPageProps {
 
 type RuleType = 'process' | 'domain' | 'domain_keyword';
 
+interface ProcessInfo {
+  name: string;
+  pid: number;
+  path?: string | null;
+  icon?: string | null;
+}
+
+const RULE_TYPE_OPTIONS = [
+  { value: 'Via VPN', label: 'Via VPN' },
+  { value: 'Direct', label: 'Direct' },
+] as const;
+
+const RULE_TYPE_ICONS = {
+  process: LuMonitor,
+  domain: LuGlobe,
+  domain_keyword: LuHash,
+} as const;
+
+const RULE_TYPE_LABELS = {
+  process: 'Process',
+  domain: 'Domain',
+  domain_keyword: 'Keyword',
+} as const;
+
 function RulesPage({ rules, setRules, vpnEnabled, restartVPN }: RulesPageProps) {
   const { t } = useI18n();
   const [osPlatform, setOsPlatform] = useState<'windows' | 'macos' | 'linux' | 'unknown'>('unknown');
@@ -25,12 +49,11 @@ function RulesPage({ rules, setRules, vpnEnabled, restartVPN }: RulesPageProps) 
   const [newRuleInputShake, setNewRuleInputShake] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [showProcessScanner, setShowProcessScanner] = useState(false);
-  const [processes, setProcesses] = useState<
-    Array<{ name: string; pid: number; path?: string | null; icon?: string | null }>
-  >([]);
+  const [processes, setProcesses] = useState<ProcessInfo[]>([]);
   const [isLoadingProcesses, setIsLoadingProcesses] = useState(false);
   const [processSearchQuery, setProcessSearchQuery] = useState('');
 
+  // Определение платформы
   useEffect(() => {
     if (!isTauri()) return;
     const ua = navigator.userAgent.toLowerCase();
@@ -45,6 +68,14 @@ function RulesPage({ rules, setRules, vpnEnabled, restartVPN }: RulesPageProps) 
 
     try {
       const { invoke } = await import('@tauri-apps/api/core');
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      
+      const selected = await open({
+        multiple: false,
+        filters: [{ name: 'YAML', extensions: ['yaml', 'yml'] }],
+      });
+
+      if (!selected || typeof selected !== 'string') return;
 
       const userRules = rules.map(r => ({
         id: r.id,
@@ -53,14 +84,6 @@ function RulesPage({ rules, setRules, vpnEnabled, restartVPN }: RulesPageProps) 
         active: r.active,
         rule_type: r.ruleType,
       }));
-
-      const { open } = await import('@tauri-apps/plugin-dialog');
-      const selected = await open({
-        multiple: false,
-        filters: [{ name: 'YAML', extensions: ['yaml', 'yml'] }],
-      });
-
-      if (!selected || typeof selected !== 'string') return;
 
       await invoke('save_rules_to_path', { path: selected, userRules });
     } catch (e) {
@@ -73,9 +96,7 @@ function RulesPage({ rules, setRules, vpnEnabled, restartVPN }: RulesPageProps) 
     setIsLoadingProcesses(true);
     try {
       const { invoke } = await import('@tauri-apps/api/core');
-      const procs = await invoke<
-        Array<{ name: string; pid: number; path?: string | null; icon?: string | null }>
-      >('get_running_processes');
+      const procs = await invoke<ProcessInfo[]>('get_running_processes');
       setProcesses(procs);
     } catch (e) {
       console.error('Failed to load processes:', e);
@@ -109,25 +130,17 @@ function RulesPage({ rules, setRules, vpnEnabled, restartVPN }: RulesPageProps) 
     if (!s) return false;
     const lower = s.toLowerCase();
 
-    // Disallow obvious URLs/paths; process rules should be just a process name.
     if (lower.includes('://') || s.includes('/') || s.includes('\\')) return false;
-
-    // Some characters are invalid/unsafe to store as a process target.
     if (/[<>:"|?*]/.test(s)) return false;
-
-    // Avoid confusing process rule with domain.
     if (lower.endsWith('.com')) return false;
 
     if (osPlatform === 'windows') {
-      // Keep strict Windows expectations to prevent user mistakes.
       if (s.includes('@')) return false;
-      if (s.includes(' ')) return false;
       const allowedExtensions = ['.exe', '.bat', '.cmd', '.scr'];
       if (!allowedExtensions.some(ext => lower.endsWith(ext))) return false;
       return true;
     }
 
-    // macOS/Linux: allow spaces, and do not require .exe.
     if (s.includes('@')) return false;
     return true;
   }, [osPlatform]);
@@ -176,10 +189,10 @@ function RulesPage({ rules, setRules, vpnEnabled, restartVPN }: RulesPageProps) 
 
     const baseId = Date.now();
     const newRules: Rule[] = [];
+    
     for (const target of targets) {
       const key = `${newRuleType}:${target.toLowerCase()}:${newRuleAction}`;
-      if (existingKeys.has(key)) continue;
-      if (seenInInput.has(key)) continue;
+      if (existingKeys.has(key) || seenInInput.has(key)) continue;
       seenInInput.add(key);
       newRules.push({
         id: baseId + newRules.length,
@@ -212,47 +225,47 @@ function RulesPage({ rules, setRules, vpnEnabled, restartVPN }: RulesPageProps) 
     }
   }, [addRule]);
 
-  const filteredRules = rules.filter(rule =>
-    rule.app.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-  const filteredProcesses = processes.filter(proc =>
-    proc.name.toLowerCase().includes(processSearchQuery.toLowerCase())
+  const filteredRules = useMemo(() => 
+    rules.filter(rule => rule.app.toLowerCase().includes(searchQuery.toLowerCase())),
+    [rules, searchQuery]
   );
 
-  const getRuleTypeLabel = (type: string) => {
-    switch (type) {
-      case 'process': return 'Process';
-      case 'domain': return 'Domain';
-      case 'domain_keyword': return 'Keyword';
-      default: return type;
-    }
-  };
-  const getRuleTypeLabelPlaceholder = (type: string) => {
+  const filteredProcesses = useMemo(() =>
+    processes.filter(proc => proc.name.toLowerCase().includes(processSearchQuery.toLowerCase())),
+    [processes, processSearchQuery]
+  );
+
+  const getRuleTypeLabel = useCallback((type: string) => {
+    return RULE_TYPE_LABELS[type as keyof typeof RULE_TYPE_LABELS] || type;
+  }, []);
+
+  const getRuleTypeLabelPlaceholder = useCallback((type: string) => {
     switch (type) {
       case 'process': return osPlatform === 'windows' ? 'chrome.exe' : 'Google Chrome';
       case 'domain': return 'youtube.com';
       case 'domain_keyword': return 'youtube';
       default: return type;
     }
-  };
+  }, [osPlatform]);
 
-  const getRuleTypeIcon = (type: string) => {
-    switch (type) {
-      case 'process': return <LuMonitor size={14} />;
-      case 'domain': return <LuGlobe size={14} />;
-      case 'domain_keyword': return <LuHash size={14} />;
-      default: return <LuMonitor size={14} />;
-    }
-  };
+  const getRuleTypeIcon = useCallback((type: string) => {
+    const Icon = RULE_TYPE_ICONS[type as keyof typeof RULE_TYPE_ICONS] || LuMonitor;
+    return <Icon size={14} />;
+  }, []);
 
-  const getAppNameTranslation = (appName: string) => {
+  const getAppNameTranslation = useCallback((appName: string) => {
     switch (appName) {
       case 'process': return t.rules.process;
       case 'domain': return t.rules.domain;
       case 'domain_keyword': return t.rules.domainkey;
       default: return appName;
     }
-  };
+  }, [t.rules]);
+
+  const ruleActionOptions = useMemo(() => [
+    { value: 'Via VPN', label: t.rules.viaVpn },
+    { value: 'Direct', label: t.rules.direct },
+  ], [t.rules.viaVpn, t.rules.direct]);
 
   return (
     <div className="page-content">
@@ -329,10 +342,7 @@ function RulesPage({ rules, setRules, vpnEnabled, restartVPN }: RulesPageProps) 
               <CustomSelect
                 value={newRuleAction}
                 onChange={(val) => setNewRuleAction(val as 'Via VPN' | 'Direct')}
-                options={[
-                  { value: 'Via VPN', label: t.rules.viaVpn },
-                  { value: 'Direct', label: t.rules.direct },
-                ]}
+                options={ruleActionOptions}
                 className="add-rule-select"
                 style={{ width: '10rem' }}
               />

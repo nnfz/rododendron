@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, useMemo } from 'react';
 import { useI18n } from '../i18n';
 import { LuLoader2 } from 'react-icons/lu';
 import type { VpnStatus } from '../types';
@@ -41,24 +41,36 @@ function HomePage({
 }: HomePageProps) {
   const { t } = useI18n();
   const { traffic, latency, formatUptime, formatTraffic } = useVPNStats(vpnEnabled, pollingEnabled);
-  const uptime = formatUptime();
-  const trafficUp = formatTraffic(traffic.up);
-  const trafficDown = formatTraffic(traffic.down);
-  const serverName =
-    homeDisplaySnapshot?.serverName ??
-    (vpnEnabled
-      ? (vpnStatus?.server || connectedConfigSnapshot?.server_address || 'Not configured')
-      : (parsedConfig?.server_address || 'Not configured'));
-  const proxyName =
-    homeDisplaySnapshot?.proxyName ??
-    (vpnEnabled
-      ? (vpnStatus?.proxy_name || connectedConfigSnapshot?.proxy_name || activeConfigName || 'Unknown')
-      : (parsedConfig?.proxy_name || activeConfigName || 'Unknown'));
-  const port =
-    homeDisplaySnapshot?.port ??
-    (vpnEnabled
-      ? (vpnStatus?.port || connectedConfigSnapshot?.mixed_port || 7890)
-      : (parsedConfig?.mixed_port || 7890));
+  
+  const uptime = useMemo(() => formatUptime(), [formatUptime]);
+  const trafficUp = useMemo(() => formatTraffic(traffic.up), [formatTraffic, traffic.up]);
+  const trafficDown = useMemo(() => formatTraffic(traffic.down), [formatTraffic, traffic.down]);
+  
+  const displayInfo = useMemo(() => {
+    const serverName = homeDisplaySnapshot?.serverName ??
+      (vpnEnabled
+        ? (vpnStatus?.server || connectedConfigSnapshot?.server_address || 'Not configured')
+        : (parsedConfig?.server_address || 'Not configured'));
+    
+    const proxyName = homeDisplaySnapshot?.proxyName ??
+      (vpnEnabled
+        ? (vpnStatus?.proxy_name || connectedConfigSnapshot?.proxy_name || activeConfigName || 'Unknown')
+        : (parsedConfig?.proxy_name || activeConfigName || 'Unknown'));
+    
+    const port = homeDisplaySnapshot?.port ??
+      (vpnEnabled
+        ? (vpnStatus?.port || connectedConfigSnapshot?.mixed_port || 7890)
+        : (parsedConfig?.mixed_port || 7890));
+
+    return { serverName, proxyName, port };
+  }, [
+    homeDisplaySnapshot,
+    vpnEnabled,
+    vpnStatus,
+    connectedConfigSnapshot,
+    parsedConfig,
+    activeConfigName,
+  ]);
 
   const handleClick = () => {
     if (!isConnecting) {
@@ -66,13 +78,13 @@ function HomePage({
     }
   };
 
-  const getSubtitle = () => {
+  const subtitle = useMemo(() => {
     if (error) return error;
     if (isConnecting) return 'Connecting...';
     if (vpnEnabled) return t.home.connectionEstablished;
     if (!hasConfig) return 'Import a config to connect';
     return t.home.notConnected;
-  };
+  }, [error, isConnecting, vpnEnabled, hasConfig, t.home]);
 
   return (
     <div className="hero animate-fadeIn">
@@ -105,20 +117,20 @@ function HomePage({
 
         <div className="hero-meta">
           <div>
-            <h1 className="hero-title">{proxyName}</h1>
+            <h1 className="hero-title">{displayInfo.proxyName}</h1>
             <p className={`hero-subtitle ${vpnEnabled ? '' : 'disconnected'} ${error ? 'error' : ''}`}>
-              {getSubtitle()}
+              {subtitle}
             </p>
           </div>
 
           <div className={`meta-list collapsible ${vpnEnabled ? 'open animate-fadeIn' : ''}`}>
             <div className="meta-row">
               <span className="meta-label">{t.home.server}:</span>
-              <span className="meta-value ip">{serverName}</span>
+              <span className="meta-value ip">{displayInfo.serverName}</span>
             </div>
             <div className="meta-row">
               <span className="meta-label">Port:</span>
-              <span className="meta-value">{port}</span>
+              <span className="meta-value">{displayInfo.port}</span>
             </div>
             <div className="meta-row">
               <span className="meta-label">{t.home.latency}:</span>

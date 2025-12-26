@@ -8,7 +8,7 @@ pub struct ProcessInfo {
     pub pid: u32,
     pub name: String,
     pub path: Option<String>,
-    pub icon: Option<String>, // Base64 encoded PNG
+    pub icon: Option<String>,
 }
 
 #[cfg(target_os = "windows")]
@@ -58,22 +58,22 @@ fn extract_icon(path: &str) -> Option<String> {
 
         let old_bmp = SelectObject(hdc, hbm_color);
 
-        let width: i32 = 32;
-        let height: i32 = 32;
+        const WIDTH: i32 = 32;
+        const HEIGHT: i32 = 32;
         let mut bmi: BITMAPINFO = std::mem::zeroed();
         bmi.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
-        bmi.bmiHeader.biWidth = width;
-        bmi.bmiHeader.biHeight = -height;
+        bmi.bmiHeader.biWidth = WIDTH;
+        bmi.bmiHeader.biHeight = -HEIGHT;
         bmi.bmiHeader.biPlanes = 1;
         bmi.bmiHeader.biBitCount = 32;
         bmi.bmiHeader.biCompression = BI_RGB;
 
-        let mut pixels: Vec<u8> = vec![0u8; (width * height * 4) as usize];
+        let mut pixels: Vec<u8> = vec![0u8; (WIDTH * HEIGHT * 4) as usize];
         let result = GetDIBits(
             hdc,
             hbm_color,
             0,
-            height as u32,
+            HEIGHT as u32,
             pixels.as_mut_ptr() as *mut _,
             &mut bmi,
             DIB_RGB_COLORS,
@@ -95,38 +95,34 @@ fn extract_icon(path: &str) -> Option<String> {
             chunk.swap(0, 2);
         }
 
-        let png_data = encode_png(&pixels, width as u32, height as u32)?;
+        let png_data = encode_png(&pixels, WIDTH as u32, HEIGHT as u32)?;
         Some(STANDARD.encode(&png_data))
     }
 }
 
 #[cfg(target_os = "windows")]
 fn encode_png(rgba: &[u8], width: u32, height: u32) -> Option<Vec<u8>> {
-    let mut png_data = Vec::new();
+    let mut png_data = Vec::with_capacity(1024);
 
     png_data.extend_from_slice(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
 
-    let mut ihdr = Vec::new();
+    let mut ihdr = Vec::with_capacity(13);
     ihdr.extend_from_slice(&width.to_be_bytes());
     ihdr.extend_from_slice(&height.to_be_bytes());
-    ihdr.push(8);
-    ihdr.push(6);
-    ihdr.push(0);
-    ihdr.push(0);
-    ihdr.push(0);
+    ihdr.extend_from_slice(&[8, 6, 0, 0, 0]);
     write_chunk(&mut png_data, b"IHDR", &ihdr);
 
-    let mut raw_data = Vec::new();
+    let row_size = (width * 4) as usize;
+    let mut raw_data = Vec::with_capacity((height as usize) * (row_size + 1));
     for y in 0..height {
         raw_data.push(0);
         let row_start = (y * width * 4) as usize;
-        let row_end = row_start + (width * 4) as usize;
+        let row_end = row_start + row_size;
         raw_data.extend_from_slice(&rgba[row_start..row_end]);
     }
 
-    let mut zlib_data = Vec::new();
-    zlib_data.push(0x78);
-    zlib_data.push(0x01);
+    let mut zlib_data = Vec::with_capacity(raw_data.len() + 100);
+    zlib_data.extend_from_slice(&[0x78, 0x01]);
 
     let mut remaining = &raw_data[..];
     while !remaining.is_empty() {
@@ -149,12 +145,13 @@ fn encode_png(rgba: &[u8], width: u32, height: u32) -> Option<Vec<u8>> {
 }
 
 #[cfg(target_os = "windows")]
+#[inline]
 fn write_chunk(png: &mut Vec<u8>, chunk_type: &[u8; 4], data: &[u8]) {
     png.extend_from_slice(&(data.len() as u32).to_be_bytes());
     png.extend_from_slice(chunk_type);
     png.extend_from_slice(data);
 
-    let mut crc_data = Vec::new();
+    let mut crc_data = Vec::with_capacity(chunk_type.len() + data.len());
     crc_data.extend_from_slice(chunk_type);
     crc_data.extend_from_slice(data);
     let crc = crc32(&crc_data);
@@ -162,59 +159,67 @@ fn write_chunk(png: &mut Vec<u8>, chunk_type: &[u8; 4], data: &[u8]) {
 }
 
 #[cfg(target_os = "windows")]
+#[inline]
 fn crc32(data: &[u8]) -> u32 {
     let mut crc: u32 = 0xFFFFFFFF;
-    for byte in data {
-        crc ^= *byte as u32;
+    for &byte in data {
+        crc ^= byte as u32;
         for _ in 0..8 {
-            if crc & 1 != 0 {
-                crc = (crc >> 1) ^ 0xEDB88320;
+            crc = if crc & 1 != 0 {
+                (crc >> 1) ^ 0xEDB88320
             } else {
-                crc >>= 1;
-            }
+                crc >> 1
+            };
         }
     }
     !crc
 }
 
 #[cfg(target_os = "windows")]
+#[inline]
 fn adler32(data: &[u8]) -> u32 {
+    const MOD_ADLER: u32 = 65521;
     let mut a: u32 = 1;
     let mut b: u32 = 0;
-    for byte in data {
-        a = (a + *byte as u32) % 65521;
-        b = (b + a) % 65521;
+    for &byte in data {
+        a = (a + byte as u32) % MOD_ADLER;
+        b = (b + a) % MOD_ADLER;
     }
     (b << 16) | a
 }
 
 #[cfg(target_os = "windows")]
-fn is_system_process(name: &str, path: &Option<String>) -> bool {
-    let system_names = [
-        "System", "Registry", "smss.exe", "csrss.exe", "wininit.exe", 
-        "services.exe", "lsass.exe", "svchost.exe", "winlogon.exe",
-        "dwm.exe", "fontdrvhost.exe", "WUDFHost.exe", "sihost.exe",
-        "taskhostw.exe", "RuntimeBroker.exe", "dllhost.exe", 
-        "conhost.exe", "spoolsv.exe", "SearchIndexer.exe",
-        "SearchHost.exe", "StartMenuExperienceHost.exe",
-        "ShellExperienceHost.exe", "TextInputHost.exe",
-        "SecurityHealthService.exe", "MsMpEng.exe", "NisSrv.exe",
-        "SgrmBroker.exe", "audiodg.exe", "SearchProtocolHost.exe",
-        "SearchFilterHost.exe", "WmiPrvSE.exe", "TrustedInstaller.exe",
-        "TiWorker.exe", "wuauclt.exe", "UsoClient.exe"
-    ];
+const SYSTEM_NAMES: &[&str] = &[
+    "System", "Registry", "smss.exe", "csrss.exe", "wininit.exe", 
+    "services.exe", "lsass.exe", "svchost.exe", "winlogon.exe",
+    "dwm.exe", "fontdrvhost.exe", "WUDFHost.exe", "sihost.exe",
+    "taskhostw.exe", "RuntimeBroker.exe", "dllhost.exe", 
+    "conhost.exe", "spoolsv.exe", "SearchIndexer.exe",
+    "SearchHost.exe", "StartMenuExperienceHost.exe",
+    "ShellExperienceHost.exe", "TextInputHost.exe",
+    "SecurityHealthService.exe", "MsMpEng.exe", "NisSrv.exe",
+    "SgrmBroker.exe", "audiodg.exe", "SearchProtocolHost.exe",
+    "SearchFilterHost.exe", "WmiPrvSE.exe", "TrustedInstaller.exe",
+    "TiWorker.exe", "wuauclt.exe", "UsoClient.exe"
+];
 
-    if system_names.iter().any(|&sys_name| name.eq_ignore_ascii_case(sys_name)) {
+#[cfg(target_os = "windows")]
+const SYSTEM_PATHS: &[&str] = &[
+    "\\windows\\system32\\",
+    "\\windows\\syswow64\\",
+    "\\windows\\winsxs\\",
+];
+
+#[cfg(target_os = "windows")]
+#[inline]
+fn is_system_process(name: &str, path: &Option<String>) -> bool {
+    if SYSTEM_NAMES.iter().any(|&sys_name| name.eq_ignore_ascii_case(sys_name)) {
         return true;
     }
 
     if let Some(p) = path {
         let p_lower = p.to_lowercase();
-        if p_lower.contains("\\windows\\system32\\") 
-            || p_lower.contains("\\windows\\syswow64\\")
-            || p_lower.contains("\\windows\\winsxs\\") {
-            return true;
-        }
+        return SYSTEM_PATHS.iter().any(|&sys_path| p_lower.contains(sys_path));
     }
 
     false
@@ -248,10 +253,9 @@ pub fn get_running_processes() -> Vec<ProcessInfo> {
                 return vec![];
             }
 
-            let num_processes = bytes_returned as usize / mem::size_of::<u32>();
+            let num_processes = (bytes_returned as usize) / mem::size_of::<u32>();
 
-            for i in 0..num_processes {
-                let pid = pids[i];
+            for &pid in &pids[..num_processes] {
                 if pid == 0 {
                     continue;
                 }
@@ -286,7 +290,6 @@ pub fn get_running_processes() -> Vec<ProcessInfo> {
                             None
                         };
 
-                        // Фильтруем системные процессы
                         if is_system_process(&name, &path) {
                             CloseHandle(handle);
                             continue;

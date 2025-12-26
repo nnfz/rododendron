@@ -15,15 +15,17 @@ import { useI18n } from './i18n';
 import { isTauri } from './utils/isTauri';
 
 const EMPTY_LOGS: Log[] = [];
+const HOME_SNAPSHOT_KEY = 'vpn-home-display-snapshot';
+const ACTIVE_CONFIG_KEY = 'vpn-active-config';
 
 function formatTime(date: Date): string {
   return date.toTimeString().split(' ')[0];
 }
 
-const HOME_SNAPSHOT_KEY = 'vpn-home-display-snapshot';
-
 export default function App() {
   const { t } = useI18n();
+  
+  // Refs для оптимизации
   const initialLoadDone = useRef(false);
   const autoConnectTriggeredRef = useRef(false);
   const autoConnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -32,10 +34,14 @@ export default function App() {
   const restartVpnInFlightRef = useRef(false);
   const restartVpnPendingRulesRef = useRef<Rule[] | null>(null);
   const prevNarrowLayoutRef = useRef<boolean | null>(null);
+  
+  // UI State
   const [isNarrowLayout, setIsNarrowLayout] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activePage, setActivePage] = useState<'home' | 'rules' | 'settings'>('home');
   const [showLogsModal, setShowLogsModal] = useState(false);
+  
+  // Data State
   const [rules, setRules] = useState<Rule[]>([]);
   const [configRulesLoaded, setConfigRulesLoaded] = useState<string | null>(null);
   const [settings, setSettings] = useSettingsStorage();
@@ -43,6 +49,7 @@ export default function App() {
   const [configsLoaded, setConfigsLoaded] = useState(false);
   const [dismissNoConfigSplash, setDismissNoConfigSplash] = useState(false);
   
+  // Config State
   const [configs, setConfigs] = useState<Config[]>([]);
   const [activeConfigId, setActiveConfigId] = useState<string>('');
   const [activeConfigContent, setActiveConfigContent] = useState<string | null>(null);
@@ -60,6 +67,7 @@ export default function App() {
     port: number;
   } | null>(null);
 
+  // Восстановление snapshot из localStorage
   useEffect(() => {
     const saved = localStorage.getItem(HOME_SNAPSHOT_KEY);
     if (!saved) return;
@@ -73,6 +81,7 @@ export default function App() {
     }
   }, []);
 
+  // Сохранение snapshot в localStorage
   useEffect(() => {
     if (!homeDisplaySnapshot) return;
     try {
@@ -92,7 +101,7 @@ export default function App() {
     }, ...prev].slice(0, 1000));
   }, []);
   
-  // Loading configurations on start
+  // Загрузка конфигураций
   useEffect(() => {
     if (!isTauri()) return;
     
@@ -108,8 +117,7 @@ export default function App() {
         setConfigs(loadedConfigs);
         setConfigsLoaded(true);
         
-        // Restore active config
-        const savedActive = localStorage.getItem('vpn-active-config');
+        const savedActive = localStorage.getItem(ACTIVE_CONFIG_KEY);
         if (savedActive && loadedConfigs.some(c => c.id === savedActive)) {
           setActiveConfigId(savedActive);
         } else if (loadedConfigs.length > 0) {
@@ -156,13 +164,13 @@ export default function App() {
     }
   }, [noConfigs, activePage]);
 
-  // Update activeConfigFilename when activeConfigId changes
+  // Обновление activeConfigFilename
   useEffect(() => {
     const config = configs.find(c => c.id === activeConfigId);
     setActiveConfigFilename(config?.filename || null);
   }, [configs, activeConfigId]);
 
-  // Loading active config content
+  // Загрузка активной конфигурации
   useEffect(() => {
     if (!activeConfigId || !isTauri() || !activeConfigFilename) return;
     let cancelled = false;
@@ -173,19 +181,17 @@ export default function App() {
       try {
         const { invoke } = await import('@tauri-apps/api/core');
         const content = await invoke<string>('read_config', { filename: expectedFilename });
-        if (cancelled) return;
-        if (expectedConfigId !== activeConfigId || expectedFilename !== activeConfigFilename) return;
+        if (cancelled || expectedConfigId !== activeConfigId || expectedFilename !== activeConfigFilename) return;
 
         setActiveConfigContent(content);
         
         const parsed = await invoke<ParsedConfig>('parse_config', { configContent: content });
-        if (cancelled) return;
-        if (expectedConfigId !== activeConfigId || expectedFilename !== activeConfigFilename) return;
+        if (cancelled || expectedConfigId !== activeConfigId || expectedFilename !== activeConfigFilename) return;
 
         setParsedConfig(parsed);
         setParsedConfigFilename(expectedFilename);
         
-        localStorage.setItem('vpn-active-config', activeConfigId);
+        localStorage.setItem(ACTIVE_CONFIG_KEY, activeConfigId);
       } catch (e) {
         console.error('Failed to load config:', e);
       }
@@ -207,8 +213,7 @@ export default function App() {
   } = useVPNState();
 
   useEffect(() => {
-    if (!vpnEnabled) return;
-    if (connectedConfigSnapshot) return;
+    if (!vpnEnabled || connectedConfigSnapshot) return;
     if (!parsedConfig || !activeConfigFilename || parsedConfigFilename !== activeConfigFilename) return;
 
     setConnectedConfigSnapshot({
@@ -219,9 +224,6 @@ export default function App() {
   }, [vpnEnabled, connectedConfigSnapshot, parsedConfig, parsedConfigFilename, activeConfigFilename]);
 
   useEffect(() => {
-    // Keep last-known display values for Home, so UI doesn't degrade to "Unknown" when
-    // vpnStatus fields are temporarily null and doesn't jump to newly selected config
-    // while VPN is still running on the previous one.
     setHomeDisplaySnapshot(prev => {
       const prevProxy = prev?.proxyName;
       const prevServer = prev?.serverName;
@@ -257,7 +259,6 @@ export default function App() {
   }, [configs, activeConfigId]);
 
   const restartVPN = useCallback(async (rulesOverride?: Rule[]) => {
-    // Coalesce rapid changes: keep only the latest rules snapshot.
     restartVpnPendingRulesRef.current = rulesOverride ?? rules;
 
     if (restartVpnTimeoutRef.current) {
@@ -266,12 +267,8 @@ export default function App() {
 
     restartVpnTimeoutRef.current = setTimeout(async () => {
       if (restartVpnInFlightRef.current) return;
-      if (!activeConfigContent) {
+      if (!activeConfigContent || !activeConfigFilename) {
         addLog('ERROR', 'No active config content found');
-        return;
-      }
-      if (!activeConfigFilename) {
-        addLog('ERROR', 'No active config filename found');
         return;
       }
 
@@ -299,8 +296,9 @@ export default function App() {
         restartVpnInFlightRef.current = false;
       }
     }, 500);
-  }, [activeConfigContent, activeConfigFilename, rules, settings.logLevel, settings.enableTun, settings.mtu, settings.killSwitch, stopVPN, startVPN, addLog]);
+  }, [activeConfigContent, activeConfigFilename, rules, settings, stopVPN, startVPN, addLog]);
 
+  // Window visibility
   useEffect(() => {
     if (!isTauri()) return;
     const run = async () => {
@@ -323,6 +321,7 @@ export default function App() {
     run();
   }, [settings.startminimized]);
 
+  // Autostart
   useEffect(() => {
     if (!isTauri()) return;
     const run = async () => {
@@ -336,6 +335,7 @@ export default function App() {
     run();
   }, [settings.autostart]);
 
+  // Close behavior
   useEffect(() => {
     if (!isTauri()) return;
     const run = async () => {
@@ -354,37 +354,73 @@ export default function App() {
   useEffect(() => {
     initialLoadDone.current = false;
     setConfigRulesLoaded(null);
-    setRules([]);
     setActiveConfigContent(null);
     setParsedConfig(null);
     setParsedConfigFilename(null);
   }, [activeConfigId]);
 
-  // Loading rules from config
+  // Загрузка правил из конфига
   useEffect(() => {
     if (!parsedConfig || !activeConfigId) return;
     if (!activeConfigFilename || parsedConfigFilename !== activeConfigFilename) return;
     if (configRulesLoaded === activeConfigId) return;
-    
-    const configRules: Rule[] = parsedConfig.rules.map((r, idx) => ({
-      id: Date.now() + idx,
-      app: r.target,
-      rule: r.action === 'PROXY' ? 'Via VPN' : 'Direct',
-      active: true,
-      ruleType: (r.rule_type === 'process' || r.rule_type === 'domain' || 
-                 r.rule_type === 'domain_keyword' || r.rule_type === 'ip') 
-        ? r.rule_type 
-        : 'domain',
-    }));
 
-    setRules(configRules);
+    const rulesStorageKey = `vpn-rules:${activeConfigId}`;
+    let savedRules: Rule[] = [];
+    try {
+      const saved = localStorage.getItem(rulesStorageKey);
+      if (saved) {
+        savedRules = JSON.parse(saved) as Rule[];
+      }
+    } catch {
+      savedRules = [];
+    }
+
+    const makeRuleKey = (rule: Pick<Rule, 'app' | 'rule' | 'ruleType'>) => {
+      const type = rule.ruleType || 'process';
+      const app = rule.app.trim().toLowerCase();
+      const action = rule.rule.trim();
+      return `${type}:${app}:${action}`;
+    };
+
+    const savedByKey = new Map<string, Rule>();
+    for (const r of savedRules) {
+      savedByKey.set(makeRuleKey(r), r);
+    }
+
+    const baseId = Date.now();
+    const configRules: Rule[] = parsedConfig.rules.map((r, idx) => {
+      const ruleType: Rule['ruleType'] =
+        r.rule_type === 'process' || r.rule_type === 'domain' || r.rule_type === 'domain_keyword' || r.rule_type === 'ip'
+          ? r.rule_type
+          : 'domain';
+
+      const nextRule: Rule = {
+        id: baseId + idx,
+        app: r.target,
+        rule: r.action === 'PROXY' ? 'Via VPN' : 'Direct',
+        active: true,
+        ruleType,
+      };
+
+      const saved = savedByKey.get(makeRuleKey(nextRule));
+      if (saved) {
+        return { ...nextRule, id: saved.id, active: saved.active };
+      }
+      return nextRule;
+    });
+
+    const configKeys = new Set(configRules.map(makeRuleKey));
+    const missingSavedInactive = savedRules.filter(r => !r.active && !configKeys.has(makeRuleKey(r)));
+
+    setRules([...configRules, ...missingSavedInactive]);
     setConfigRulesLoaded(activeConfigId);
     setTimeout(() => {
       initialLoadDone.current = true;
     }, 100);
   }, [parsedConfig, parsedConfigFilename, activeConfigId, activeConfigFilename, configRulesLoaded]);
 
-  // Auto-saving rules to config
+  // Авто-сохранение правил
   useEffect(() => {
     if (!isTauri() || !activeConfigFilename || !initialLoadDone.current) return;
     
@@ -399,10 +435,7 @@ export default function App() {
           rule_type: r.ruleType || 'process',
         }));
         
-        await invoke('save_rules_to_config', {
-          filename: activeConfigFilename,
-          userRules,
-        });
+        await invoke('save_rules_to_config', { filename: activeConfigFilename, userRules });
       } catch (e) {
         console.error('Failed to save rules:', e);
       }
@@ -445,8 +478,9 @@ export default function App() {
         addLog('ERROR', `Failed to start VPN: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
-  }, [vpnEnabled, activeConfigContent, activeConfigFilename, rules, settings.killSwitch, settings.logLevel, settings.enableTun, settings.mtu, startVPN, stopVPN, addLog, parsedConfig]);
+  }, [vpnEnabled, activeConfigContent, activeConfigFilename, rules, settings, startVPN, stopVPN, addLog, parsedConfig]);
 
+  // Auto-connect cleanup
   useEffect(() => {
     return () => {
       if (autoConnectTimeoutRef.current) {
@@ -456,6 +490,7 @@ export default function App() {
     };
   }, []);
 
+  // Auto-connect logic
   useEffect(() => {
     if (!settings.autoConnect) {
       autoConnectTriggeredRef.current = false;
@@ -467,9 +502,7 @@ export default function App() {
     }
     if (vpnEnabled || isConnecting) return;
     if (!activeConfigContent || !activeConfigFilename) return;
-
-    if (autoConnectTriggeredRef.current) return;
-    if (autoConnectTimeoutRef.current) return;
+    if (autoConnectTriggeredRef.current || autoConnectTimeoutRef.current) return;
 
     addLog('INFO', 'Auto-connect: scheduled...');
     autoConnectTimeoutRef.current = setTimeout(() => {
@@ -480,6 +513,7 @@ export default function App() {
     }, 1500);
   }, [settings.autoConnect, vpnEnabled, isConnecting, activeConfigContent, activeConfigFilename, handleToggleVPN, addLog]);
 
+  // Kill switch logic
   useEffect(() => {
     if (!settings.killSwitch) {
       wasVpnEnabledRef.current = vpnEnabled;
@@ -506,6 +540,7 @@ export default function App() {
     document.documentElement.classList.add('dark');
   }, []);
 
+  // Layout resize handler
   useEffect(() => {
     const update = () => {
       const narrow = window.innerWidth < 1140;
@@ -572,28 +607,18 @@ export default function App() {
     configs,
     activeConfigId,
     rules,
-    setRules,
     restartVPN,
-    setConfigs,
-    setSettings,
     settings,
-    setShowLogsModal,
-    vpnEnabled,
     wrappedSetActiveConfigId,
   ]);
 
   return (
-    
     <div className="app-root">
       {configsLoaded && configs.length === 0 && !dismissNoConfigSplash && (
         <div className="no-config-overlay">
           <div className="no-config-card">
-            <div className="no-config-title">
-              {t.welcome.addConfigTitle}
-            </div>
-            <div className="no-config-subtitle">
-              {t.welcome.addConfigSubtitle}
-            </div>
+            <div className="no-config-title">{t.welcome.addConfigTitle}</div>
+            <div className="no-config-subtitle">{t.welcome.addConfigSubtitle}</div>
             <div className="no-config-actions">
               <button
                 type="button"

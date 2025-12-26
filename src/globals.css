@@ -265,6 +265,7 @@ body {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  align-items: stretch;
   justify-content: center;
 }
 
@@ -1232,7 +1233,7 @@ select.input option {
 
 .modal {
   border-radius: 0.5rem;
-  width: 900px;
+  width: 950px;
   max-height: 600px;
   display: flex;
   flex-direction: column;
@@ -1325,7 +1326,6 @@ select.input option {
 
 /* Container */
 .container-narrow {
-  max-width: 64rem;
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
@@ -1576,7 +1576,6 @@ select.input option {
 
 .config-delete-btn:hover:not(:disabled), .config-delete-btn:hover:not(:disabled) .delete-label {
   color: rgb(239, 68, 68);
-  background-color: rgba(239, 68, 68, .1);
   transition: 0.2s ease;
 }
 
@@ -1586,8 +1585,12 @@ select.input option {
 
 .config-import-btn:hover, .config-import-btn:hover .import-label {
   color: var(--accent);
-  background-color: rgba(47, 150, 255, .1) !important;
   transition: 0.2s ease;
+}
+
+.import-label {
+  transition: 0.2s ease;
+  background-color: transparent !important;
 }
 
 .delete-label {
@@ -1756,4 +1759,9 @@ select.input option {
 .type-btn-right {
   border-top-left-radius: 0 !important;
   border-bottom-left-radius: 0 !important;
+}
+
+.setting-top{
+  display: flex;
+  gap: 12px;
 }
