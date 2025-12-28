@@ -104,9 +104,6 @@ pub fn run() {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = apply_acrylic(&window, Some((18, 18, 18, 125)));
                 }
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.set_title("");
-                }
             }
 
             Ok(())
