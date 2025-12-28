@@ -49,40 +49,19 @@ function Titlebar({ showSidebarToggle, sidebarOpen, onToggleSidebar, closeBehavi
   return (
     <div data-tauri-drag-region className="titlebar">
       <div className={isMac ? 'titlebar-left mac' : 'titlebar-left'}>
-        {isMac ? (
-          <>
-            <div className="mac-window-controls">
-              <button
-                type="button"
-                className="mac-window-btn mac-close"
-                onClick={handleClose}
-                aria-label={t.common.close}
-              />
-              <button
-                type="button"
-                className="mac-window-btn mac-minimize"
-                onClick={handleMinimize}
-                aria-label={t.common.minimize}
-              />
-              <button
-                type="button"
-                className="mac-window-btn mac-maximize"
-                onClick={handleMaximize}
-                aria-label={t.common.maximize}
-              />
-            </div>
-            {showSidebarToggle && (
-              <button
-                type="button"
-                className={`titlebar-btn sidebar-toggle ${sidebarOpen ? 'active' : ''}`}
-                onClick={onToggleSidebar}
-                aria-label="Toggle sidebar"
-              >
-                <LuMenu size={16} />
-              </button>
-            )}
-          </>
-        ) : (
+        {isMac && (
+          showSidebarToggle && (
+            <button
+              type="button"
+              className={`titlebar-btn sidebar-mac sidebar-toggle ${sidebarOpen ? 'active' : ''}`}
+              onClick={onToggleSidebar}
+              aria-label="Toggle sidebar"
+            >
+              <LuMenu size={16} />
+            </button>
+          )
+        )}
+        {!isMac && (
           showSidebarToggle && (
             <button
               type="button"

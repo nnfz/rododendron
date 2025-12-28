@@ -19,6 +19,7 @@ use autostart::set_autostart;
 use updater::{check_for_updates, install_update};
 
 use tauri::Manager;
+use tauri::Emitter;
 use tauri::{menu::{Menu, MenuItemBuilder}, tray::TrayIconBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
 
@@ -56,9 +57,12 @@ pub fn run() {
 
             #[cfg(not(target_os = "windows"))]
             let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/128x128.png"))?;
+            let start = MenuItemBuilder::with_id("tray_start", "Start").build(app)?;
+            let stop = MenuItemBuilder::with_id("tray_stop", "Stop").build(app)?;
+            let restart = MenuItemBuilder::with_id("tray_restart", "Restart").build(app)?;
             let show = MenuItemBuilder::with_id("tray_show", "Show").build(app)?;
             let quit = MenuItemBuilder::with_id("tray_quit", "Quit").build(app)?;
-            let menu = Menu::with_items(app, &[&show, &quit])?;
+            let menu = Menu::with_items(app, &[&start, &stop, &restart, &show, &quit])?;
 
             TrayIconBuilder::<tauri::Wry>::with_id("main-tray")
                 .icon(icon)
@@ -81,6 +85,27 @@ pub fn run() {
                 })
                 .on_menu_event(|app, event| {
                     match event.id().as_ref() {
+                        "tray_start" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.emit("tray://start", ());
+                                let _ = window.show();
+                                let _ = window.unminimize();
+                                let _ = window.set_focus();
+                            }
+                        }
+                        "tray_stop" => {
+                            tauri::async_runtime::spawn(async move {
+                                let _ = stop_vpn().await;
+                            });
+                        }
+                        "tray_restart" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.emit("tray://restart", ());
+                                let _ = window.show();
+                                let _ = window.unminimize();
+                                let _ = window.set_focus();
+                            }
+                        }
                         "tray_show" => {
                             if let Some(window) = app.get_webview_window("main") {
                                 let _ = window.show();
@@ -97,14 +122,6 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            #[cfg(target_os = "windows")]
-            {
-                use window_vibrancy::apply_acrylic;
-
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = apply_acrylic(&window, Some((18, 18, 18, 125)));
-                }
-            }
 
             Ok(())
         })

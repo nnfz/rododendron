@@ -10,13 +10,13 @@ const DEFAULT_SETTINGS: Settings = {
   startminimized: false,
   autoConnect: false,
   autoCheckUpdates: true,
-  autoRestartOnRuleApply: false,
+  autoRestartOnRuleApply: true,
   closeBehavior: 'tray',
   killSwitch: false,
   logLevel: 'info',
   mtu: '1500',
   enableTun: true,
-  snowfall: true
+  snowfall: false
 };
 
 // Helper function to load settings from localStorage

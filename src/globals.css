@@ -3,7 +3,8 @@
 :root {
   --bg: #050505;
   --appbg: #050505;
-  --sidebg: rgba(5, 5, 5, .3);
+  --sidebg: rgba(5, 5, 5, .6);
+  --titlebg: rgba(5, 5, 5, .8);
   --fg: #efefef;
   --muted: #6b7280;
   --border: rgba(55, 55, 60, 0.6);
@@ -144,8 +145,9 @@ body {
 /* Custom Titlebar */
 .titlebar {
   height: 2rem;
-  background: var(--sidebg);
+  background: var(--titlebg);
   border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(2px);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -278,7 +280,7 @@ body {
   display: flex;
   flex-direction: column;
   height: calc(100vh - 2rem);
-  backdrop-filter: blur(10px);
+  backdrop-filter: blur(6px);
   color: var(--fg);
 }
 
@@ -290,6 +292,10 @@ body {
   bottom: 0;
   background: rgba(0, 0, 0, 0.55);
   z-index: 9999;
+}
+
+.sidebar-mac{
+  margin-left: 90px;
 }
 
 .setting-label-with-help {

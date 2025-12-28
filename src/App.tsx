@@ -430,6 +430,62 @@ export default function App() {
     }, 500);
   }, [activeConfigContent, activeConfigFilename, rules, settings, stopVPN, startVPN, addLog]);
 
+  // Tray actions
+  useEffect(() => {
+    if (!isTauri()) return;
+
+    let unlistenStart: null | (() => void) = null;
+    let unlistenRestart: null | (() => void) = null;
+
+    const setup = async () => {
+      try {
+        const { listen } = await import('@tauri-apps/api/event');
+
+        unlistenStart = await listen('tray://start', async () => {
+          if (vpnEnabled) return;
+          if (!activeConfigContent || !activeConfigFilename) {
+            addLog('ERROR', 'No active config selected for Start');
+            return;
+          }
+          try {
+            addLog('INFO', 'Starting VPN (tray)...');
+            await startVPN(
+              activeConfigContent,
+              activeConfigFilename,
+              rules,
+              settings.logLevel,
+              settings.enableTun,
+              settings.mtu,
+              settings.killSwitch
+            );
+            addLog('INFO', 'VPN started');
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            addLog('ERROR', `Failed to start VPN: ${msg}`);
+          }
+        });
+
+        unlistenRestart = await listen('tray://restart', async () => {
+          if (!activeConfigContent || !activeConfigFilename) {
+            addLog('ERROR', 'No active config selected for Restart');
+            return;
+          }
+          addLog('INFO', 'Restarting VPN (tray)...');
+          await restartVPN();
+        });
+      } catch (e) {
+        console.error('Failed to setup tray listeners:', e);
+      }
+    };
+
+    setup();
+
+    return () => {
+      try { unlistenStart?.(); } catch {}
+      try { unlistenRestart?.(); } catch {}
+    };
+  }, [vpnEnabled, activeConfigContent, activeConfigFilename, rules, settings, startVPN, restartVPN, addLog]);
+
   // Window visibility
   useEffect(() => {
     if (!isTauri()) return;
