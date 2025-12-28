@@ -373,6 +373,43 @@ export default function App() {
           const rulesToApply = restartVpnPendingRulesRef.current;
           restartVpnPendingRulesRef.current = null;
 
+          const isRulesHotReload = rulesOverride !== undefined;
+
+          if (isRulesHotReload && isTauri()) {
+            try {
+              const { invoke } = await import('@tauri-apps/api/core');
+
+              const userRules = rulesToApply.map(r => ({
+                id: r.id,
+                app: r.app,
+                rule: r.rule,
+                active: r.active,
+                rule_type: r.ruleType || 'process',
+              }));
+
+              const mtuValue = settings.mtu ? parseInt(settings.mtu, 10) : 1500;
+
+              const finalConfig = await invoke('generate_config', {
+                baseConfig: activeConfigContent,
+                userRules,
+                logLevel: settings.logLevel,
+                enableTun: settings.enableTun,
+                mtu: mtuValue,
+                killSwitch: settings.killSwitch,
+              }) as string;
+
+              addLog('INFO', 'Applying rules without restart...');
+              await invoke('reload_mihomo_config', {
+                configContent: finalConfig,
+                configFilename: activeConfigFilename,
+              });
+              addLog('INFO', 'Rules applied');
+              continue;
+            } catch (e) {
+              console.error('Failed to hot reload config, falling back to restart:', e);
+            }
+          }
+
           addLog('INFO', 'Restarting VPN...');
           await stopVPN();
           await new Promise(resolve => setTimeout(resolve, 1000));

@@ -2,6 +2,8 @@
 
 :root {
   --bg: #050505;
+  --appbg: rgba(5, 5, 5, .7);
+  --sidebg: rgba(5, 5, 5, .3);
   --fg: #efefef;
   --muted: #6b7280;
   --border: rgba(55, 55, 60, 0.6);
@@ -25,7 +27,7 @@ body {
 
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  background: var(--bg);
+  background: var(--appbg);
   color: var(--fg);
   margin: 0;
   user-select: none;
@@ -130,7 +132,6 @@ body {
   flex-direction: column;
   height: 100vh;
   overflow: hidden;
-  background: var(--bg);
   color: var(--fg);
 }
 
@@ -143,7 +144,7 @@ body {
 /* Custom Titlebar */
 .titlebar {
   height: 2rem;
-  background: rgba(10, 10, 10, 0.95);
+  background: var(--sidebg);
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
@@ -272,9 +273,7 @@ body {
 /* Sidebar */
 .sidebar {
   width: 16rem;
-  background: rgba(15, 15, 15, 0.45);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: var(--sidebg);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
@@ -959,8 +958,8 @@ select.input option {
 
 .hero-circle.disconnected {
   border-color: var(--border);
-  background: rgba(12, 12, 12, 0.98);
-  box-shadow: 0 0 40px rgba(0, 0, 0, 0.5);
+  background: var(--sidebg);
+  box-shadow: 0 0 80px rgba(0, 0, 0, 0.5);
 }
 
 .hero-circle.connecting {

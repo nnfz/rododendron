@@ -12,14 +12,14 @@
   "app": {
     "windows": [
       {
-        "title": "Rododendron",
+        "title": "",
         "visible": false,
         "width": 1200,
         "height": 800,
         "minHeight": 600,
         "minWidth": 1000,
         "decorations": false,
-        "transparent": false,
+        "transparent": true,
         "center": true,
         "resizable": true
       }

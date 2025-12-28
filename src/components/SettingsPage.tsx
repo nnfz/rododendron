@@ -263,6 +263,7 @@ function SettingsPage({
       `    port: ${port}`,
       `    uuid: ${url.username}`,
       '    udp: true',
+      '    packet-encoding: xudp',
       `    network: ${network}`,
       '',
       `    tls: ${tlsEnabled ? 'true' : 'false'}`,

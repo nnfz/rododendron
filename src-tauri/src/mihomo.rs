@@ -85,6 +85,7 @@ pub struct MihomoTraffic {
 }
 
 #[cfg(target_os = "windows")]
+#[allow(dead_code)]
 fn has_admin_privileges() -> bool {
     use windows_sys::Win32::Security::{
         GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY,
@@ -574,7 +575,12 @@ pub fn generate_config(
 
     yaml["log-level"] = serde_yaml::Value::String(log_level.to_lowercase());
 
+    if yaml.get("external-controller").is_none() {
+        yaml["external-controller"] = serde_yaml::Value::String("127.0.0.1:9090".to_string());
+    }
+
     let mut profile = serde_yaml::Mapping::new();
+    profile.insert("store-fake-ip".into(), serde_yaml::Value::Bool(true));
     profile.insert("store-selected".into(), serde_yaml::Value::Bool(true));
     yaml["profile"] = serde_yaml::Value::Mapping(profile);
     
@@ -612,6 +618,31 @@ pub fn generate_config(
     tun.insert("dns-hijack".into(), serde_yaml::Value::Sequence(vec![serde_yaml::Value::String("any:53".to_string())]));
     yaml["tun"] = serde_yaml::Value::Mapping(tun);
 
+    let mut dns = serde_yaml::Mapping::new();
+    dns.insert("enable".into(), serde_yaml::Value::Bool(true));
+    dns.insert("ipv6".into(), serde_yaml::Value::Bool(true));
+    dns.insert("enhanced-mode".into(), serde_yaml::Value::String("fake-ip".to_string()));
+    dns.insert("fake-ip-range".into(), serde_yaml::Value::String("198.18.0.1/16".to_string()));
+    dns.insert("default-nameserver".into(), serde_yaml::Value::Sequence(vec![serde_yaml::Value::String("1.1.1.1".to_string()), serde_yaml::Value::String("8.8.8.8".to_string())]));
+    dns.insert("nameserver".into(), serde_yaml::Value::Sequence(vec![serde_yaml::Value::String("https://1.1.1.1/dns-query".to_string()), serde_yaml::Value::String("https://8.8.8.8/dns-query".to_string())]));
+    dns.insert("fallback".into(), serde_yaml::Value::Sequence(vec![serde_yaml::Value::String("https://dns.google/dns-query".to_string())]));
+
+    let mut fallback_filter = serde_yaml::Mapping::new();
+    fallback_filter.insert("geoip".into(), serde_yaml::Value::Bool(true));
+    fallback_filter.insert("geoip-code".into(), serde_yaml::Value::String("RU".to_string()));
+    dns.insert("fallback-filter".into(), serde_yaml::Value::Mapping(fallback_filter));
+
+    let mut cache = serde_yaml::Mapping::new();
+    cache.insert("size".into(), serde_yaml::Value::Number(serde_yaml::Number::from(4096)));
+    cache.insert("min-ttl".into(), serde_yaml::Value::Number(serde_yaml::Number::from(600)));
+    dns.insert("cache".into(), serde_yaml::Value::Mapping(cache));
+
+    dns.insert("fake-ip-filter".into(), serde_yaml::Value::Sequence(vec![serde_yaml::Value::String("*.lan".to_string()), serde_yaml::Value::String("*.local".to_string())]));
+
+    yaml["dns"] = serde_yaml::Value::Mapping(dns);
+    yaml["tcp-concurrent"] = serde_yaml::Value::Bool(true);
+    yaml["unified-delay"] = serde_yaml::Value::Bool(true);
+    yaml["keep-alive-interval"] = serde_yaml::Value::Number(serde_yaml::Number::from(30));
     serde_yaml::to_string(&yaml).map_err(|e| format!("Failed to serialize YAML: {}", e))
 }
 
@@ -738,32 +769,17 @@ pub async fn start_vpn(
     config_filename: String,
     enable_tun: bool,
 ) -> Result<VpnStatus, String> {
-    #[cfg(not(target_os = "windows"))]
-    {
-        if enable_tun && !has_admin_privileges() {
-            return Err("TUN requires elevated privileges on this OS. Please disable TUN in settings or run the app with sudo/root.".to_string());
-        }
-    }
 
     #[cfg(target_os = "windows")]
     {
         let _ = enable_tun;
     }
 
-    kill_existing_mihomo();
-    thread::sleep(std::time::Duration::from_millis(500));
-    
-    let mut process_guard = MIHOMO_PROCESS.lock().map_err(|e| e.to_string())?;
-
-    if let Some(mut child) = process_guard.take() {
-        let _ = child.kill();
-        let _ = child.wait();
-    // ... (rest of the code remains the same)
-    }
-
-    let mihomo_path = get_mihomo_path(&app);
-    if !mihomo_path.exists() {
-        return Err(format!("Mihomo binary not found at: {:?}", mihomo_path));
+    #[cfg(not(target_os = "windows"))]
+    {
+        if enable_tun && !has_admin_privileges() {
+            return Err("TUN requires elevated privileges on this OS. Please disable TUN in settings or run the app with sudo/root.".to_string());
+        }
     }
 
     let config_dir = primary_config_dir(&app);
@@ -774,20 +790,27 @@ pub async fn start_vpn(
         .map_err(|e| format!("Failed to write config: {}", e))?;
 
     let log_path = config_dir.join("mihomo.log");
-    let _ = fs::remove_file(&log_path);
 
-    #[cfg(target_os = "windows")]
     {
-        if !has_admin_privileges() {
-            return Err("This application needs to run with administrator privileges to function properly as a VPN. Please run the application as administrator.".to_string());
+        let is_running = {
+            let process_guard = MIHOMO_PROCESS.lock().map_err(|e| e.to_string())?;
+            process_guard.is_some()
+        };
+        if is_running {
+            let mut process_guard = MIHOMO_PROCESS.lock().map_err(|e| e.to_string())?;
+            if let Some(mut child) = process_guard.take() {
+                child.kill().map_err(|e| format!("Failed to kill mihomo: {}", e))?;
+                let _ = child.wait();
+            }
         }
     }
 
-    let mut cmd = Command::new(&mihomo_path);
-    cmd.arg("-d")
-        .arg(&config_dir)
-        .arg("-f")
-        .arg(&config_path)
+    kill_existing_mihomo();
+
+    let mihomo_path = get_mihomo_path(&app);
+
+    let mut cmd = Command::new(mihomo_path);
+    cmd.arg("-f").arg(&config_path)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
@@ -802,10 +825,12 @@ pub async fn start_vpn(
 
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
-
     spawn_log_reader(stdout, stderr, log_path);
 
-    *process_guard = Some(child);
+    {
+        let mut process_guard = MIHOMO_PROCESS.lock().map_err(|e| e.to_string())?;
+        *process_guard = Some(child);
+    }
 
     update_controller_config(&config_content);
 
@@ -819,19 +844,150 @@ pub async fn start_vpn(
     })
 }
 
+#[tauri::command(rename_all = "camelCase")]
+pub async fn reload_mihomo_config(
+    app: AppHandle,
+    config_content: String,
+    config_filename: String,
+) -> Result<(), String> {
+
+    let is_running = {
+        let process_guard = MIHOMO_PROCESS.lock().map_err(|e| e.to_string())?;
+        process_guard.is_some()
+    };
+    if !is_running {
+        return Err("Mihomo не запущен".to_string());
+    }
+
+    let config_dir = primary_config_dir(&app);
+    fs::create_dir_all(&config_dir).map_err(|e| format!("Failed to create config dir: {}", e))?;
+
+    let config_path = config_dir.join(&config_filename);
+    fs::write(&config_path, &config_content)
+        .map_err(|e| format!("Failed to write config: {}", e))?;
+
+    let cfg = { CONTROLLER_CONFIG.lock().map_err(|e| e.to_string())?.clone() };
+    let config_path_str = config_path.to_string_lossy().to_string();
+    let mut last_err: Option<String> = None;
+
+    for suffix in ["/configs?force=true", "/v1/configs?force=true"] {
+        let url = format!("http://{}:{}{}", cfg.host, cfg.port, suffix);
+        let mut req = HTTP_CLIENT
+            .put(url)
+            .json(&serde_json::json!({
+                "path": config_path_str
+            }));
+
+        if let Some(secret) = &cfg.secret {
+            req = req.header(
+                reqwest::header::AUTHORIZATION,
+                format!("Bearer {}", secret),
+            );
+        }
+
+        match req.send().await {
+            Ok(resp) => {
+                if let Err(e) = resp.error_for_status() {
+                    last_err = Some(format!("API returned error: {}", e));
+                    continue;
+                }
+                update_controller_config(&config_content);
+                return Ok(());
+            }
+            Err(e) => {
+                last_err = Some(format!("Failed to reload config: {}", e));
+            }
+        }
+    }
+
+    Err(last_err.unwrap_or_else(|| "Failed to reload config".to_string()))
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn switch_mihomo_mode(mode: String) -> Result<(), String> {
+    let cfg = { CONTROLLER_CONFIG.lock().map_err(|e| e.to_string())?.clone() };
+    let mut last_err: Option<String> = None;
+
+    for suffix in ["/configs", "/v1/configs"] {
+        let url = format!("http://{}:{}{}", cfg.host, cfg.port, suffix);
+        let mut req = HTTP_CLIENT.patch(url).json(&serde_json::json!({
+            "mode": mode
+        }));
+
+        if let Some(secret) = &cfg.secret {
+            req = req.header(
+                reqwest::header::AUTHORIZATION,
+                format!("Bearer {}", secret),
+            );
+        }
+
+        match req.send().await {
+            Ok(resp) => {
+                if let Err(e) = resp.error_for_status() {
+                    last_err = Some(format!("API returned error: {}", e));
+                    continue;
+                }
+                return Ok(());
+            }
+            Err(e) => {
+                last_err = Some(format!("Failed to switch mode: {}", e));
+            }
+        }
+    }
+
+    Err(last_err.unwrap_or_else(|| "Failed to switch mode".to_string()))
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn switch_proxy_group(group_name: String, proxy_name: String) -> Result<(), String> {
+    let cfg = { CONTROLLER_CONFIG.lock().map_err(|e| e.to_string())?.clone() };
+    let encoded_group = urlencoding::encode(&group_name);
+    let mut last_err: Option<String> = None;
+
+    for prefix in ["/proxies/", "/v1/proxies/"] {
+        let url = format!("http://{}:{}{}{}", cfg.host, cfg.port, prefix, encoded_group);
+        let mut req = HTTP_CLIENT.put(url).json(&serde_json::json!({
+            "name": proxy_name
+        }));
+
+        if let Some(secret) = &cfg.secret {
+            req = req.header(
+                reqwest::header::AUTHORIZATION,
+                format!("Bearer {}", secret),
+            );
+        }
+
+        match req.send().await {
+            Ok(resp) => {
+                if let Err(e) = resp.error_for_status() {
+                    last_err = Some(format!("API returned error: {}", e));
+                    continue;
+                }
+                return Ok(());
+            }
+            Err(e) => {
+                last_err = Some(format!("Failed to switch proxy: {}", e));
+            }
+        }
+    }
+
+    Err(last_err.unwrap_or_else(|| "Failed to switch proxy".to_string()))
+}
+
 fn spawn_log_reader(
     stdout: Option<std::process::ChildStdout>,
     stderr: Option<std::process::ChildStderr>,
     log_path: PathBuf,
 ) {
+
     thread::spawn(move || {
         let mut log_file = match std::fs::OpenOptions::new()
             .create(true)
             .append(true)
             .open(&log_path) {
-            Ok(f) => f,
-            Err(_) => {
-                eprintln!("Failed to open log file");
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("Failed to open log file: {}", e);
                 return;
             }
         };

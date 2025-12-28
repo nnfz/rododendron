@@ -7,6 +7,7 @@ use process_scanner::get_running_processes;
 use mihomo::{
     parse_config, generate_config, import_config,
     start_vpn, stop_vpn, get_vpn_status,
+    reload_mihomo_config, switch_mihomo_mode, switch_proxy_group,
     list_configs, read_config, delete_config,
     save_rules_to_config, save_rules_to_path, export_config_to_path, resolve_config_path, get_mihomo_logs, clear_mihomo_logs,
     get_mihomo_binary_name,
@@ -96,6 +97,18 @@ pub fn run() {
                 })
                 .build(app)?;
 
+            #[cfg(target_os = "windows")]
+            {
+                use window_vibrancy::apply_acrylic;
+
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = apply_acrylic(&window, Some((18, 18, 18, 125)));
+                }
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.set_title("");
+                }
+            }
+
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -129,6 +142,9 @@ pub fn run() {
             set_autostart,
             set_close_behavior,
             start_vpn,
+            reload_mihomo_config,
+            switch_mihomo_mode,
+            switch_proxy_group,
             stop_vpn,
             get_vpn_status,
             list_configs,
