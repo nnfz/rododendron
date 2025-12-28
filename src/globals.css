@@ -2,7 +2,7 @@
 
 :root {
   --bg: #050505;
-  --appbg: rgba(5, 5, 5, .7);
+  --appbg: #050505;
   --sidebg: rgba(5, 5, 5, .3);
   --fg: #efefef;
   --muted: #6b7280;
@@ -278,6 +278,7 @@ body {
   display: flex;
   flex-direction: column;
   height: calc(100vh - 2rem);
+  backdrop-filter: blur(10px);
   color: var(--fg);
 }
 
