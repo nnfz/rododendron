@@ -4,6 +4,13 @@ export interface Rule {
   rule: string;
   active: boolean;
   ruleType: 'process' | 'domain' | 'domain_keyword' | 'ip';
+  tags?: number[];
+}
+
+export interface Tag {
+  id: number;
+  name: string;
+  color: string;
 }
 
 export type LogLevel = 'INFO' | 'WARNING' | 'ERROR' | 'DEBUG';

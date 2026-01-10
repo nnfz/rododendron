@@ -7,18 +7,19 @@ interface SidebarProps {
   activeTab: TabType;
   setActiveTab: (tab: TabType) => void;
   vpnEnabled: boolean;
-  restartVPN: () => void;
+  restartVPN: () => Promise<void>;
+  needsRestart?: boolean;
   hasConfig: boolean;
   hasUpdate?: boolean;
   className?: string;
 }
 
-function Sidebar({ activeTab, setActiveTab, vpnEnabled, restartVPN, hasConfig, hasUpdate, className }: SidebarProps) {
+function Sidebar({ activeTab, setActiveTab, vpnEnabled, restartVPN, needsRestart, hasConfig, hasUpdate, className }: SidebarProps) {
   const { t } = useI18n();
 
   const handleRestart = () => {
     if (vpnEnabled && hasConfig) {
-      restartVPN();
+      void restartVPN();
     }
   };
 
@@ -63,7 +64,7 @@ function Sidebar({ activeTab, setActiveTab, vpnEnabled, restartVPN, hasConfig, h
 
       <div className="sidebar-footer">
         <button 
-          className="btn btn-ghost-dark btn-restart" 
+          className={`btn btn-ghost-dark btn-restart ${needsRestart ? 'needs-restart' : ''}`.trim()} 
           onClick={handleRestart} 
           disabled={!vpnEnabled || !hasConfig}
         >

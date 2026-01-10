@@ -23,7 +23,72 @@ use tauri::Emitter;
 use tauri::{menu::{Menu, MenuItemBuilder}, tray::TrayIconBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
 
+use image::Rgba;
+use image::codecs::png::PngEncoder;
+use image::ColorType;
+use image::ImageEncoder;
+
 use std::sync::{LazyLock, Mutex};
+
+fn build_tray_icon_png(vpn_enabled: bool) -> Result<tauri::image::Image<'static>, String> {
+    let base_bytes: &[u8] = include_bytes!("../icons/32x32.png");
+    let dyn_img = image::load_from_memory(base_bytes).map_err(|e| e.to_string())?;
+    let mut rgba = dyn_img.to_rgba8();
+
+    if vpn_enabled {
+        let w = rgba.width() as i32;
+        let h = rgba.height() as i32;
+        let r: i32 = 6;
+        let cx: i32 = w - (r + 3);
+        let cy: i32 = h - (r + 3);
+
+        let fill = Rgba([59u8, 130u8, 246u8, 255u8]);
+        let outline = Rgba([255u8, 255u8, 255u8, 230u8]);
+
+        for y in (cy - r - 1)..=(cy + r + 1) {
+            for x in (cx - r - 1)..=(cx + r + 1) {
+                if x < 0 || y < 0 || x >= w || y >= h {
+                    continue;
+                }
+                let dx = x - cx;
+                let dy = y - cy;
+                let d2 = dx * dx + dy * dy;
+                let px = x as u32;
+                let py = y as u32;
+
+                if d2 <= r * r {
+                    rgba.put_pixel(px, py, fill);
+                } else if d2 <= (r + 1) * (r + 1) {
+                    rgba.put_pixel(px, py, outline);
+                }
+            }
+        }
+    }
+
+    let mut out = Vec::<u8>::new();
+    let encoder = PngEncoder::new(&mut out);
+    encoder
+        .write_image(
+            rgba.as_raw(),
+            rgba.width(),
+            rgba.height(),
+            ColorType::Rgba8.into(),
+        )
+        .map_err(|e| e.to_string())?;
+
+    tauri::image::Image::from_bytes(&out).map_err(|e| e.to_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn set_tray_vpn_enabled(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let tray = app
+        .tray_by_id("main-tray")
+        .ok_or_else(|| "Tray icon not found".to_string())?;
+
+    let icon = build_tray_icon_png(enabled)?;
+    tray.set_icon(Some(icon)).map_err(|e| e.to_string())?;
+    Ok(())
+}
 
 #[derive(Clone, Copy)]
 enum CloseBehavior {
@@ -52,11 +117,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
-            #[cfg(target_os = "windows")]
-            let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/icon.ico"))?;
-
-            #[cfg(not(target_os = "windows"))]
-            let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/128x128.png"))?;
+            let icon = build_tray_icon_png(false)?;
             let start = MenuItemBuilder::with_id("tray_start", "Start").build(app)?;
             let stop = MenuItemBuilder::with_id("tray_stop", "Stop").build(app)?;
             let restart = MenuItemBuilder::with_id("tray_restart", "Restart").build(app)?;
@@ -155,6 +216,7 @@ pub fn run() {
             import_config,
             set_autostart,
             set_close_behavior,
+            set_tray_vpn_enabled,
             start_vpn,
             reload_mihomo_config,
             switch_mihomo_mode,

@@ -26,6 +26,17 @@ export type Translations = {
     addRule: string;
     exportToConfig: string;
     exportToConfigHelp: string;
+    tags: string;
+    allTags: string;
+    manageTags: string;
+    newTag: string;
+    tagName: string;
+    tagColor: string;
+    copy: string;
+    paste: string;
+    noTags: string;
+    noTagsYet: string;
+    editRuleTags: string;
     process: string;
     domain: string;
     domainkey: string;
@@ -150,6 +161,17 @@ export const translations: Record<Language, Translations> = {
       addRule: 'Add Rule',
       exportToConfig: 'Save rules to config',
       exportToConfigHelp: 'Saves your current rules into a YAML config file you choose.',
+      tags: 'Tags',
+      allTags: 'All',
+      manageTags: 'Manage tags',
+      newTag: 'New tag',
+      tagName: 'Tag name',
+      tagColor: 'Tag color',
+      copy: 'Copy',
+      paste: 'Paste',
+      noTags: 'No tags',
+      noTagsYet: 'No tags yet',
+      editRuleTags: 'Rule tags',
       process: 'Process',
       domain: 'Domain',
       domainkey: 'Keyword',
@@ -272,6 +294,17 @@ export const translations: Record<Language, Translations> = {
       addRule: 'Добавить правило',
       exportToConfig: 'Сохранить правила в конфиг',
       exportToConfigHelp: 'Сохраняет текущие правила в YAML-конфиг, который ты выберешь.',
+      tags: 'Теги',
+      allTags: 'Все',
+      manageTags: 'Управление тегами',
+      newTag: 'Новый тег',
+      tagName: 'Имя тега',
+      tagColor: 'Цвет',
+      copy: 'Копировать',
+      paste: 'Вставить',
+      noTags: 'Без тегов',
+      noTagsYet: 'Тегов пока нет',
+      editRuleTags: 'Теги правила',
       process: 'Процесс',
       domain: 'Домен',
       type: 'Тип',
@@ -395,6 +428,17 @@ export const translations: Record<Language, Translations> = {
       addRule: 'Дадаць правіла',
       exportToConfig: 'Захаваць правілы ў канфіг',
       exportToConfigHelp: 'Захоўвае бягучыя правілы ў YAML-канфіг, які ты выберыш.',
+      tags: 'Тэгі',
+      allTags: 'Усе',
+      manageTags: 'Кіраванне тэгамі',
+      newTag: 'Новы тэг',
+      tagName: 'Назва тэга',
+      tagColor: 'Колер',
+      copy: 'Капіяваць',
+      paste: 'Уставіць',
+      noTags: 'Без тэгаў',
+      noTagsYet: 'Тэгаў пакуль няма',
+      editRuleTags: 'Тэгі правіла',
       process: 'Працэс',
       type: 'Тып',
       target: 'Мэта',

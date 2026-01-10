@@ -10,7 +10,8 @@ import LogsModal from './components/LogsModal';
 import { useVPNState } from './hooks/useVPNState';
 import { useSettingsStorage } from './hooks/useSettingsStorage';
 import { useRulesStorage } from './hooks/useRulesStorage';
-import type { Rule, Log, LogLevel, Config, ParsedConfig } from './types';
+import { useTagsStorage } from './hooks/useTagsStorage';
+import type { Rule, Tag, Log, LogLevel, Config, ParsedConfig } from './types';
 import { useI18n } from './i18n';
 import { isTauri } from './utils/isTauri';
 
@@ -46,6 +47,7 @@ export default function App() {
   
   // Data State
   const [rules, setRules] = useState<Rule[]>([]);
+  const [tags, setTags] = useState<Tag[]>([]);
   const [configRulesLoaded, setConfigRulesLoaded] = useState<string | null>(null);
   const [settings, setSettings] = useSettingsStorage();
   const [logs, setLogs] = useState<Log[]>([]);
@@ -66,6 +68,8 @@ export default function App() {
     server_address: string | null;
     mixed_port: number | null;
   } | null>(null);
+  const [vpnRunningConfigId, setVpnRunningConfigId] = useState<string | null>(null);
+  const [restartRequiredForConfig, setRestartRequiredForConfig] = useState(false);
   const [homeDisplaySnapshot, setHomeDisplaySnapshot] = useState<{
     proxyName: string;
     serverName: string;
@@ -308,6 +312,37 @@ export default function App() {
   } = useVPNState();
 
   useEffect(() => {
+    if (!vpnEnabled) {
+      setVpnRunningConfigId(null);
+      setRestartRequiredForConfig(false);
+    }
+  }, [vpnEnabled]);
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    const run = async () => {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        await invoke('set_tray_vpn_enabled', { enabled: vpnEnabled });
+      } catch (e) {
+        console.error('Failed to update tray icon:', e);
+      }
+    };
+    run();
+  }, [vpnEnabled]);
+
+  useEffect(() => {
+    if (!vpnEnabled) return;
+    if (!vpnRunningConfigId || !activeConfigId) return;
+
+    if (activeConfigId === vpnRunningConfigId) {
+      setRestartRequiredForConfig(false);
+    } else {
+      setRestartRequiredForConfig(true);
+    }
+  }, [vpnEnabled, vpnRunningConfigId, activeConfigId]);
+
+  useEffect(() => {
     if (!vpnEnabled || connectedConfigSnapshot) return;
     if (!parsedConfig || !activeConfigFilename || parsedConfigFilename !== activeConfigFilename) return;
 
@@ -406,6 +441,8 @@ export default function App() {
               addLog('INFO', 'Rules applied');
               continue;
             } catch (e) {
+              const msg = e instanceof Error ? e.message : String(e);
+              addLog('ERROR', `Hot reload failed, falling back to restart: ${msg}`);
               console.error('Failed to hot reload config, falling back to restart:', e);
             }
           }
@@ -422,13 +459,15 @@ export default function App() {
             settings.mtu,
             settings.killSwitch
           );
+          setVpnRunningConfigId(activeConfigId || null);
+          setRestartRequiredForConfig(false);
           addLog('INFO', 'VPN restarted');
         }
       } finally {
         restartVpnInFlightRef.current = false;
       }
     }, 500);
-  }, [activeConfigContent, activeConfigFilename, rules, settings, stopVPN, startVPN, addLog]);
+  }, [activeConfigContent, activeConfigFilename, rules, settings, stopVPN, startVPN, addLog, activeConfigId]);
 
   // Tray actions
   useEffect(() => {
@@ -458,10 +497,17 @@ export default function App() {
               settings.mtu,
               settings.killSwitch
             );
-            addLog('INFO', 'VPN started');
-          } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            addLog('ERROR', `Failed to start VPN: ${msg}`);
+
+            setVpnRunningConfigId(activeConfigId || null);
+            setRestartRequiredForConfig(false);
+
+            setConnectedConfigSnapshot({
+              proxy_name: parsedConfig?.proxy_name ?? null,
+              server_address: parsedConfig?.server_address ?? null,
+              mixed_port: typeof parsedConfig?.mixed_port === 'number' ? parsedConfig.mixed_port : null,
+            });
+          } catch (error) {
+            addLog('ERROR', `Failed to start VPN: ${error instanceof Error ? error.message : String(error)}`);
           }
         });
 
@@ -484,7 +530,7 @@ export default function App() {
       try { unlistenStart?.(); } catch {}
       try { unlistenRestart?.(); } catch {}
     };
-  }, [vpnEnabled, activeConfigContent, activeConfigFilename, rules, settings, startVPN, restartVPN, addLog]);
+  }, [vpnEnabled, activeConfigContent, activeConfigFilename, rules, settings, startVPN, restartVPN, addLog, parsedConfig, activeConfigId]);
 
   // Window visibility
   useEffect(() => {
@@ -538,6 +584,7 @@ export default function App() {
   }, [settings.closeBehavior]);
 
   useRulesStorage(activeConfigId, rules, setRules);
+  useTagsStorage(activeConfigId, tags, setTags);
 
   useEffect(() => {
     initialLoadDone.current = false;
@@ -593,7 +640,7 @@ export default function App() {
 
       const saved = savedByKey.get(makeRuleKey(nextRule));
       if (saved) {
-        return { ...nextRule, id: saved.id, active: saved.active };
+        return { ...nextRule, id: saved.id, active: saved.active, tags: saved.tags };
       }
       return nextRule;
     });
@@ -657,6 +704,9 @@ export default function App() {
           settings.killSwitch
         );
 
+        setVpnRunningConfigId(activeConfigId || null);
+        setRestartRequiredForConfig(false);
+
         setConnectedConfigSnapshot({
           proxy_name: parsedConfig?.proxy_name ?? null,
           server_address: parsedConfig?.server_address ?? null,
@@ -666,7 +716,7 @@ export default function App() {
         addLog('ERROR', `Failed to start VPN: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
-  }, [vpnEnabled, activeConfigContent, activeConfigFilename, rules, settings, startVPN, stopVPN, addLog, parsedConfig]);
+  }, [vpnEnabled, activeConfigContent, activeConfigFilename, rules, settings, startVPN, stopVPN, addLog, parsedConfig, activeConfigId]);
 
   // Auto-connect cleanup
   useEffect(() => {
@@ -764,6 +814,8 @@ export default function App() {
           <RulesPage 
             rules={rules}
             setRules={setRules}
+            tags={tags}
+            setTags={setTags}
             vpnEnabled={vpnEnabled}
             restartVPN={restartVPN}
             activeConfigFilename={activeConfigFilename}
@@ -797,6 +849,7 @@ export default function App() {
     configs,
     activeConfigId,
     rules,
+    tags,
     restartVPN,
     settings,
     wrappedSetActiveConfigId,
@@ -858,6 +911,7 @@ export default function App() {
           setActiveTab={setActiveTab} 
           vpnEnabled={vpnEnabled} 
           restartVPN={restartVPN}
+          needsRestart={vpnEnabled && restartRequiredForConfig}
           hasConfig={!!activeConfigContent}
           hasUpdate={updateAvailable}
           className={isNarrowLayout ? `sidebar-floating ${sidebarOpen ? 'sidebar-open' : ''}` : ''}
