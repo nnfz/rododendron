@@ -1,6 +1,7 @@
 import { memo, useEffect, useState, useCallback, useMemo, useRef, type Dispatch, type SetStateAction } from 'react';
 import { createPortal } from 'react-dom';
-import { LuPlus, LuTrash2, LuSearch, LuMonitor, LuGlobe, LuHash, LuX } from 'react-icons/lu';
+import { LuPlus, LuTrash2, LuSearch, LuMonitor, LuGlobe, LuHash, LuX, LuChevronDown } from 'react-icons/lu';
+
 import { useI18n } from '../i18n';
 import type { Rule, Tag } from '../types';
 import { isTauri } from '../utils/isTauri';
@@ -27,11 +28,74 @@ const TAG_COLOR_PRESETS = [
   '#111827',
 ] as const;
 
+const TAG_FILTER_COLLAPSED_COUNT = 8;
+const RULE_GROUPS_COLLAPSED_KEY = 'rules-collapsed-groups-v1';
+
 function normalizeHexColor(input: string): string | null {
   const s = input.trim();
   const v = s.startsWith('#') ? s : `#${s}`;
-  if (!/^#[0-9a-fA-F]{6}$/.test(v)) return null;
+  if (!/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(v)) return null;
   return v.toLowerCase();
+}
+
+function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
+  const n = normalizeHexColor(hex);
+  if (!n || n.length < 7) return null;
+  const r = parseInt(n.slice(1, 3), 16);
+  const g = parseInt(n.slice(3, 5), 16);
+  const b = parseInt(n.slice(5, 7), 16);
+  return { r, g, b };
+}
+
+function rgbToHex(r: number, g: number, b: number): string {
+  const clamp = (v: number) => Math.min(255, Math.max(0, Math.round(v)));
+  const to2 = (v: number) => clamp(v).toString(16).padStart(2, '0');
+  return `#${to2(r)}${to2(g)}${to2(b)}`;
+}
+
+function parseTagColor(input: string): { hex: string; alpha: number } | null {
+  const s = input.trim().toLowerCase();
+  if (!s) return null;
+
+  if (s.startsWith('#')) {
+    const n = normalizeHexColor(s);
+    if (!n) return null;
+    if (n.length === 9) {
+      const a = parseInt(n.slice(7, 9), 16);
+      return { hex: n.slice(0, 7), alpha: Math.min(1, Math.max(0, a / 255)) };
+    }
+    return { hex: n.slice(0, 7), alpha: 1 };
+  }
+
+  const rgba = s.match(/^rgba\(\s*([0-9]{1,3})\s*,\s*([0-9]{1,3})\s*,\s*([0-9]{1,3})\s*,\s*([0-9]*\.?[0-9]+)\s*\)$/);
+  if (rgba) {
+    const r = Number(rgba[1]);
+    const g = Number(rgba[2]);
+    const b = Number(rgba[3]);
+    const a = Number(rgba[4]);
+    if ([r, g, b, a].some(v => Number.isNaN(v))) return null;
+    return { hex: rgbToHex(r, g, b), alpha: Math.min(1, Math.max(0, a)) };
+  }
+
+  const rgb = s.match(/^rgb\(\s*([0-9]{1,3})\s*,\s*([0-9]{1,3})\s*,\s*([0-9]{1,3})\s*\)$/);
+  if (rgb) {
+    const r = Number(rgb[1]);
+    const g = Number(rgb[2]);
+    const b = Number(rgb[3]);
+    if ([r, g, b].some(v => Number.isNaN(v))) return null;
+    return { hex: rgbToHex(r, g, b), alpha: 1 };
+  }
+
+  return null;
+}
+
+function cssFromHexAlpha(hex: string, alpha: number): string {
+  const rgb = hexToRgb(hex);
+  const a = Math.min(1, Math.max(0, alpha));
+  if (!rgb) return hex;
+  if (a >= 0.999) return hex;
+  const rounded = Math.round(a * 1000) / 1000;
+  return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${rounded})`;
 }
 
 function normalizeRuleFromClipboard(raw: unknown, fallbackId: number): Rule | null {
@@ -72,13 +136,20 @@ function ColorPicker({
   ariaLabel: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [draftHex, setDraftHex] = useState(value);
+  const parsed = useMemo(() => parseTagColor(value), [value]);
+  const baseHex = parsed?.hex ?? '#3b82f6';
+  const currentAlpha = parsed?.alpha ?? 1;
+
+  const [draftHex, setDraftHex] = useState(baseHex);
+  const [draftAlpha, setDraftAlpha] = useState(currentAlpha);
   const anchorRef = useRef<HTMLButtonElement | null>(null);
   const [pos, setPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
 
   useEffect(() => {
-    setDraftHex(value);
-  }, [value]);
+    if (open) return;
+    setDraftHex(baseHex);
+    setDraftAlpha(currentAlpha);
+  }, [baseHex, currentAlpha, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -126,19 +197,30 @@ function ColorPicker({
   const applyHex = useCallback(() => {
     const normalized = normalizeHexColor(draftHex);
     if (!normalized) return;
-    onChange(normalized);
-  }, [draftHex, onChange]);
+
+    if (normalized.length === 9) {
+      const parsedInline = parseTagColor(normalized);
+      if (!parsedInline) return;
+      setDraftHex(parsedInline.hex);
+      setDraftAlpha(parsedInline.alpha);
+      onChange(cssFromHexAlpha(parsedInline.hex, parsedInline.alpha));
+      return;
+    }
+
+    onChange(cssFromHexAlpha(normalized.slice(0, 7), draftAlpha));
+  }, [draftAlpha, draftHex, onChange]);
 
   return (
     <div className="color-picker-root">
       <button
         type="button"
         className="color-swatch-btn"
-        style={{ background: value }}
+        style={{ background: cssFromHexAlpha(baseHex, currentAlpha) }}
         aria-label={ariaLabel}
         ref={anchorRef}
         onClick={() => setOpen(v => !v)}
       />
+
       {open
         ? createPortal(
             <div
@@ -152,11 +234,45 @@ function ColorPicker({
                   <button
                     key={c}
                     type="button"
-                    className={`color-swatch ${c.toLowerCase() === value.toLowerCase() ? 'active' : ''}`}
+                    className={`color-swatch ${c.toLowerCase() === baseHex.toLowerCase() ? 'active' : ''}`}
                     style={{ background: c }}
-                    onClick={() => onChange(c)}
+                    onClick={() => {
+                      setDraftHex(c);
+                      onChange(cssFromHexAlpha(c, draftAlpha));
+                    }}
                   />
                 ))}
+              </div>
+
+              <div className="color-alpha-row">
+                <span className="color-alpha-label">Opacity</span>
+                <div
+                  className="color-alpha-track"
+                  style={{ ['--alpha-pct' as any]: `${Math.round(draftAlpha * 100)}%` }}
+                >
+                  <input
+                    type="range"
+                    className="color-alpha-slider"
+                    min={0}
+                    max={100}
+                    value={Math.round(draftAlpha * 100)}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onInput={(e) => {
+                      const next = Math.min(1, Math.max(0, Number((e.target as HTMLInputElement).value) / 100));
+                      setDraftAlpha(next);
+                      const normalized = normalizeHexColor(draftHex)?.slice(0, 7) ?? baseHex;
+                      onChange(cssFromHexAlpha(normalized, next));
+                    }}
+                    onChange={(e) => {
+                      const next = Math.min(1, Math.max(0, Number(e.target.value) / 100));
+                      setDraftAlpha(next);
+                      const normalized = normalizeHexColor(draftHex)?.slice(0, 7) ?? baseHex;
+                      onChange(cssFromHexAlpha(normalized, next));
+                    }}
+                  />
+                </div>
+                <span className="color-alpha-value">{Math.round(draftAlpha * 100)}%</span>
               </div>
 
               <div className="color-hex-row">
@@ -178,8 +294,12 @@ function ColorPicker({
                 <label className="color-native-wrap">
                   <input
                     type="color"
-                    value={value}
-                    onChange={e => onChange(e.target.value)}
+                    value={baseHex}
+                    onChange={e => {
+                      const next = normalizeHexColor(e.target.value)?.slice(0, 7) ?? e.target.value;
+                      setDraftHex(next);
+                      onChange(cssFromHexAlpha(next, draftAlpha));
+                    }}
                     aria-label={ariaLabel}
                   />
                   <span className="btn btn-ghost-dark">More</span>
@@ -236,9 +356,13 @@ function RulesPage({ rules, setRules, tags, setTags, vpnEnabled, restartVPN, aut
   const [newRuleInputShake, setNewRuleInputShake] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTagId, setSelectedTagId] = useState<number | null>(null);
+  const [tagsExpanded, setTagsExpanded] = useState(false);
+  const [collapsedRuleGroups, setCollapsedRuleGroups] = useState<Record<string, boolean>>({});
   const [showTagsManager, setShowTagsManager] = useState(false);
   const [ruleTagsPopover, setRuleTagsPopover] = useState<null | { ruleId: number; top: number; left: number }>(null);
   const ruleTagsAnchorRef = useRef<HTMLElement | null>(null);
+  const ruleTagsPopoverRef = useRef<HTMLDivElement | null>(null);
+
   const [newTagName, setNewTagName] = useState('');
   const [newTagColor, setNewTagColor] = useState('#3b82f6');
   const [showProcessScanner, setShowProcessScanner] = useState(false);
@@ -252,14 +376,43 @@ function RulesPage({ rules, setRules, tags, setTags, vpnEnabled, restartVPN, aut
     return m;
   }, [tags]);
 
+  const tagsForFilterBar = useMemo(() => {
+    if (tagsExpanded) return tags;
+    const base = tags.slice(0, TAG_FILTER_COLLAPSED_COUNT);
+    if (selectedTagId === null) return base;
+    if (base.some(tg => tg.id === selectedTagId)) return base;
+    const selected = tagsById.get(selectedTagId);
+    return selected ? [...base, selected] : base;
+  }, [tags, tagsExpanded, selectedTagId, tagsById]);
+
   useEffect(() => {
     if (!isTauri()) return;
     const ua = navigator.userAgent.toLowerCase();
-    if (ua.includes("windows")) setOsPlatform('windows');
-    else if (ua.includes("mac os") || ua.includes("macos")) setOsPlatform('macos');
-    else if (ua.includes("linux")) setOsPlatform('linux');
+    if (ua.includes('windows')) setOsPlatform('windows');
+    else if (ua.includes('mac os') || ua.includes('macos')) setOsPlatform('macos');
+    else if (ua.includes('linux')) setOsPlatform('linux');
     else setOsPlatform('unknown');
   }, []);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(RULE_GROUPS_COLLAPSED_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as unknown;
+      if (!parsed || typeof parsed !== 'object') return;
+      setCollapsedRuleGroups(parsed as Record<string, boolean>);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(RULE_GROUPS_COLLAPSED_KEY, JSON.stringify(collapsedRuleGroups));
+    } catch {
+      // ignore
+    }
+  }, [collapsedRuleGroups]);
 
   const copyRulesToClipboard = useCallback(async () => {
     try {
@@ -488,59 +641,39 @@ function RulesPage({ rules, setRules, tags, setTags, vpnEnabled, restartVPN, aut
     }
   }, [rules, setRules, vpnEnabled, restartVPN, autoRestartOnRuleApply]);
 
-  useEffect(() => {
-    if (!ruleTagsPopover) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setRuleTagsPopover(null);
-    };
-    const onPointerDown = (e: MouseEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (!target) return;
-      if (target.closest('.rule-tags-popover')) return;
-      if (target.closest('.rule-tags-cell')) return;
-      setRuleTagsPopover(null);
-    };
-
-    const recalc = () => {
-      const el = ruleTagsAnchorRef.current;
-      if (!el) {
-        setRuleTagsPopover(null);
-        return;
-      }
-      const rect = el.getBoundingClientRect();
-      const gap = 10;
-      const width = 300;
-      const left = Math.min(Math.max(8, rect.left), window.innerWidth - width - 8);
-      const top = Math.min(rect.bottom + gap, window.innerHeight - 8);
-      setRuleTagsPopover(prev => (prev ? { ...prev, top, left } : prev));
-
-      const anchorOutOfView = rect.bottom < 0 || rect.top > window.innerHeight || rect.right < 0 || rect.left > window.innerWidth;
-      if (anchorOutOfView) setRuleTagsPopover(null);
-    };
-
-    window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('mousedown', onPointerDown);
-    window.addEventListener('resize', recalc);
-    window.addEventListener('scroll', recalc, true);
-    return () => {
-      window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('mousedown', onPointerDown);
-      window.removeEventListener('resize', recalc);
-      window.removeEventListener('scroll', recalc, true);
-    };
-  }, [ruleTagsPopover]);
+  const formatTagName = useCallback((name: string) => {
+    const max = 8;
+    if (name.length <= max) return name;
+    return `${name.slice(0, max)}...`;
+  }, []);
 
   const openRuleTagsPopover = useCallback((ruleId: number, anchorEl: HTMLElement) => {
     ruleTagsAnchorRef.current = anchorEl;
     const rect = anchorEl.getBoundingClientRect();
     const gap = 10;
-    const width = 300;
-    const left = Math.min(Math.max(8, rect.left), window.innerWidth - width - 8);
-    const top = Math.min(rect.bottom + gap, window.innerHeight - 8);
-    setRuleTagsPopover(prev => {
-      if (prev?.ruleId === ruleId) return null;
-      return { ruleId, top, left };
-    });
+    const popW = ruleTagsPopoverRef.current?.offsetWidth ?? 300;
+    const popH = ruleTagsPopoverRef.current?.offsetHeight ?? 320;
+
+    const left = Math.min(Math.max(8, rect.left), window.innerWidth - popW - 8);
+    const belowTop = rect.bottom + gap;
+    const aboveTop = rect.top - gap - popH;
+    const maxTop = Math.max(8, window.innerHeight - popH - 8);
+
+    const clamp = (v: number) => Math.min(Math.max(8, v), maxTop);
+    const topBelow = clamp(belowTop);
+    const topAbove = clamp(aboveTop);
+    const belowFits = belowTop + popH <= window.innerHeight - 8;
+    const aboveFits = aboveTop >= 8;
+
+    let top = topBelow;
+    if (!belowFits && aboveFits) {
+      top = topAbove;
+    } else if (!belowFits && !aboveFits) {
+      const shiftBelow = Math.abs(topBelow - belowTop);
+      const shiftAbove = Math.abs(topAbove - aboveTop);
+      top = shiftAbove < shiftBelow ? topAbove : topBelow;
+    }
+    setRuleTagsPopover(prev => (prev ? { ...prev, top, left } : { ruleId, top, left }));
   }, []);
 
   const filteredRules = useMemo(() => {
@@ -554,6 +687,39 @@ function RulesPage({ rules, setRules, tags, setTags, vpnEnabled, restartVPN, aut
       return true;
     });
   }, [rules, searchQuery, selectedTagId]);
+
+  const ruleGroups = useMemo(() => {
+    type Group = { key: string; title: string; color: string | null; rules: Rule[] };
+    const map = new Map<string, Group>();
+
+    for (const r of filteredRules) {
+      const tagId = (r.tags && r.tags.length > 0) ? r.tags[0] : null;
+      if (tagId === null) {
+        const key = 'untagged';
+        const existing = map.get(key);
+        if (existing) existing.rules.push(r);
+        else map.set(key, { key, title: t.rules.noTags, color: null, rules: [r] });
+        continue;
+      }
+
+      const tag = tagsById.get(tagId);
+      const key = `tag:${tagId}`;
+      const title = tag?.name ?? `Tag ${tagId}`;
+      const color = tag?.color ?? '#64748b';
+      const existing = map.get(key);
+      if (existing) existing.rules.push(r);
+      else map.set(key, { key, title, color, rules: [r] });
+    }
+
+    const list = Array.from(map.values());
+    for (const g of list) g.rules.sort((a, b) => a.app.localeCompare(b.app));
+
+    const untaggedIdx = list.findIndex(g => g.key === 'untagged');
+    const untagged = untaggedIdx >= 0 ? list.splice(untaggedIdx, 1)[0] : null;
+    list.sort((a, b) => a.title.localeCompare(b.title));
+    if (untagged) list.push(untagged);
+    return list;
+  }, [filteredRules, tagsById, t.rules.noTags]);
 
   const filteredProcesses = useMemo(() =>
     processes.filter(proc => proc.name.toLowerCase().includes(processSearchQuery.toLowerCase())),
@@ -671,21 +837,20 @@ function RulesPage({ rules, setRules, tags, setTags, vpnEnabled, restartVPN, aut
 
         {rules.length > 0 && (
           <div className="panel">
-            <div className="panel-row disabled">
-              <div className="flex-center" style={{ width: '100%' }}>
+            <div className="panel-row disabled rules-search-row">
+              <div className="rules-searchbox">
                 <LuSearch size={18} />
                 <input
                   type="text"
                   placeholder={t.rules.searchRules}
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
-                  className="input"
-                  style={{ width: '100%', border: 'none', background: 'transparent' }}
+                  className="rules-search-input"
                 />
               </div>
             </div>
 
-            <div className="panel-row disabled" style={{ gap: '0.75rem', alignItems: 'flex-start' }}>
+            <div className="panel-row disabled rules-tags-row" style={{ gap: '0.75rem', alignItems: 'flex-start' }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', flex: 1, minWidth: 0 }}>
                 <span className="setting-label">{t.rules.tags}</span>
                 <div className="tag-filter-bar">
@@ -696,18 +861,29 @@ function RulesPage({ rules, setRules, tags, setTags, vpnEnabled, restartVPN, aut
                   >
                     {t.rules.allTags}
                   </button>
-                  {tags.map(tag => (
+                  {tagsForFilterBar.map(tag => (
                     <button
                       key={tag.id}
                       type="button"
                       className={`tag-filter-chip ${selectedTagId === tag.id ? 'active' : ''}`}
                       style={{ background: tag.color }}
-                      onClick={() => setSelectedTagId(prev => (prev === tag.id ? null : tag.id))}
+                      onClick={() => setSelectedTagId(tag.id)}
                       title={tag.name}
                     >
-                      {tag.name}
+                      {formatTagName(tag.name)}
                     </button>
                   ))}
+                  {tags.length > TAG_FILTER_COLLAPSED_COUNT && (
+                    <button
+                      type="button"
+                      className={`tag-collapse-btn ${tagsExpanded ? 'expanded' : ''}`}
+                      onClick={() => setTagsExpanded(v => !v)}
+                      aria-label={tagsExpanded ? 'Collapse tags' : 'Expand tags'}
+                      title={tagsExpanded ? 'Collapse tags' : 'Expand tags'}
+                    >
+                      <LuChevronDown size={14} />
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -730,61 +906,102 @@ function RulesPage({ rules, setRules, tags, setTags, vpnEnabled, restartVPN, aut
               <div className="col-span-2">{t.rules.status}</div>
               <div className="col-span-1 text-right">{t.rules.actions}</div>
             </div>
-            {filteredRules.map(rule => (
-              <div key={rule.id} className="row grid-12">
-                <div className="col-span-1">
-                  <span className="rule-type-badge">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      {getRuleTypeIcon(rule.ruleType)}
-                      {getRuleTypeLabel(getAppNameTranslation(rule.ruleType))}
+
+            {ruleGroups.map(group => {
+              const collapsed = !!collapsedRuleGroups[group.key];
+              const toggleGroup = () => setCollapsedRuleGroups(prev => ({ ...prev, [group.key]: !prev[group.key] }));
+              return (
+                <div key={group.key} className="rules-group">
+                  <div className="rules-group-header-row">
+                    <button
+                      type="button"
+                      className={`rules-group-toggle ${collapsed ? 'collapsed' : ''}`}
+                      onClick={toggleGroup}
+                      aria-label={collapsed ? 'Expand group' : 'Collapse group'}
+                      title={collapsed ? 'Expand group' : 'Collapse group'}
+                    >
+                      <LuChevronDown size={16} className="rules-group-chevron" />
+                    </button>
+
+                    <div
+                      className="rules-group-title"
+                      title={group.title}
+                      onClick={toggleGroup}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          toggleGroup();
+                        }
+                      }}
+                    >
+                      {group.color ? <span className="rules-group-dot" style={{ background: group.color }} /> : null}
+                      <span className="rules-group-name">{group.title}</span>
+                      <span className="rules-group-count">{group.rules.length}</span>
                     </div>
-                  </span>
+                  </div>
+
+                  {collapsed
+                    ? null
+                    : group.rules.map(rule => (
+                        <div key={rule.id} className="row grid-12">
+                          <div className="col-span-1">
+                            <span className="rule-type-badge">
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                {getRuleTypeIcon(rule.ruleType)}
+                                {getRuleTypeLabel(getAppNameTranslation(rule.ruleType))}
+                              </div>
+                            </span>
+                          </div>
+                          <div className="col-span-4">
+                            <span className="rule-app">{rule.app}</span>
+                          </div>
+                          <div className="col-span-2">
+                            <button
+                              type="button"
+                              className="rule-tags-cell"
+                              onClick={(e) => openRuleTagsPopover(rule.id, e.currentTarget)}
+                            >
+                              <div className="rule-tags-wrap">
+                                {(rule.tags || []).map(tid => {
+                                  const tag = tagsById.get(tid);
+                                  if (!tag) return null;
+                                  return (
+                                    <span key={tid} className="tag-chip" style={{ background: tag.color }} title={tag.name}>
+                                      {formatTagName(tag.name)}
+                                    </span>
+                                  );
+                                })}
+                                {(rule.tags || []).length === 0 ? (
+                                  <span className="tag-chip tag-chip-empty">{t.rules.noTags}</span>
+                                ) : null}
+                              </div>
+                            </button>
+                          </div>
+                          <div className="col-span-2">
+                            <span className={`tag ${rule.rule === 'Via VPN' ? 'tag-proxy-active' : 'tag-proxy-inactive'}`}>
+                              {rule.rule === 'Via VPN' ? t.rules.viaVpn : t.rules.direct}
+                            </span>
+                          </div>
+                          <div className="col-span-2">
+                            <button
+                              onClick={() => toggleRule(rule.id)}
+                              className={`btn-pill ${rule.active ? 'active' : 'inactive'}`}
+                            >
+                              {rule.active ? t.rules.active : t.rules.inactive}
+                            </button>
+                          </div>
+                          <div className="col-span-1 text-right">
+                            <button onClick={() => deleteRule(rule.id)} className="btn btn-icon">
+                              <LuTrash2 size={18} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
                 </div>
-                <div className="col-span-4">
-                  <span className="rule-app">{rule.app}</span>
-                </div>
-                <div className="col-span-2">
-                  <button
-                    type="button"
-                    className="rule-tags-cell"
-                    onClick={(e) => openRuleTagsPopover(rule.id, e.currentTarget)}
-                  >
-                    <div className="rule-tags-wrap">
-                      {(rule.tags || []).map(tid => {
-                        const tag = tagsById.get(tid);
-                        if (!tag) return null;
-                        return (
-                          <span key={tid} className="tag-chip" style={{ background: tag.color }}>
-                            {tag.name}
-                          </span>
-                        );
-                      })}
-                      {(rule.tags || []).length === 0 ? (
-                        <span className="tag-chip tag-chip-empty">{t.rules.noTags}</span>
-                      ) : null}
-                    </div>
-                  </button>
-                </div>
-                <div className="col-span-2">
-                  <span className={`tag ${rule.rule === 'Via VPN' ? 'tag-proxy-active' : 'tag-proxy-inactive'}`}>
-                    {rule.rule === 'Via VPN' ? t.rules.viaVpn : t.rules.direct}
-                  </span>
-                </div>
-                <div className="col-span-2">
-                  <button
-                    onClick={() => toggleRule(rule.id)}
-                    className={`btn-pill ${rule.active ? 'active' : 'inactive'}`}
-                  >
-                    {rule.active ? t.rules.active : t.rules.inactive}
-                  </button>
-                </div>
-                <div className="col-span-1 text-right">
-                  <button onClick={() => deleteRule(rule.id)} className="btn btn-icon">
-                    <LuTrash2 size={18} />
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <div className="panel">
@@ -889,7 +1106,7 @@ function RulesPage({ rules, setRules, tags, setTags, vpnEnabled, restartVPN, aut
               <div className="tags-manager-list">
                 {tags.map(tag => (
                   <div key={tag.id} className="tags-manager-row">
-                    <span className="tag-chip" style={{ background: tag.color }}>{tag.name}</span>
+                    <span className="tag-chip" style={{ background: tag.color }} title={tag.name}>{formatTagName(tag.name)}</span>
                     <input
                       type="text"
                       className="input"
@@ -925,6 +1142,7 @@ function RulesPage({ rules, setRules, tags, setTags, vpnEnabled, restartVPN, aut
                 role="dialog"
                 aria-label={t.rules.editRuleTags}
                 style={{ top: ruleTagsPopover.top, left: ruleTagsPopover.left }}
+                ref={ruleTagsPopoverRef}
               >
                 <div className="rule-tags-popover-body">
                   <div className="rule-tags-popover-list">
@@ -938,7 +1156,7 @@ function RulesPage({ rules, setRules, tags, setTags, vpnEnabled, restartVPN, aut
                             onChange={() => void toggleRuleTag(ruleTagsPopover.ruleId, tag.id)}
                           />
                           <span className="ui-checkbox" aria-hidden="true" />
-                          <span className="tag-chip" style={{ background: tag.color }}>{tag.name}</span>
+                          <span className="tag-chip" style={{ background: tag.color }} title={tag.name}>{formatTagName(tag.name)}</span>
                         </label>
                       );
                     })}
