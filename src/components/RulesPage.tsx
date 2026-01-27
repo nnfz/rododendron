@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { LuPlus, LuTrash2, LuSearch, LuMonitor, LuGlobe, LuHash, LuX, LuChevronDown } from 'react-icons/lu';
 
 import { useI18n } from '../i18n';
+
 import type { Rule, Tag } from '../types';
 import { isTauri } from '../utils/isTauri';
 import CustomSelect from './CustomSelect';
@@ -135,6 +136,7 @@ function ColorPicker({
   onChange: (next: string) => void;
   ariaLabel: string;
 }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const parsed = useMemo(() => parseTagColor(value), [value]);
   const baseHex = parsed?.hex ?? '#3b82f6';
@@ -143,6 +145,7 @@ function ColorPicker({
   const [draftHex, setDraftHex] = useState(baseHex);
   const [draftAlpha, setDraftAlpha] = useState(currentAlpha);
   const anchorRef = useRef<HTMLButtonElement | null>(null);
+  const alphaTrackRef = useRef<HTMLDivElement | null>(null);
   const [pos, setPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
 
   useEffect(() => {
@@ -210,6 +213,20 @@ function ColorPicker({
     onChange(cssFromHexAlpha(normalized.slice(0, 7), draftAlpha));
   }, [draftAlpha, draftHex, onChange]);
 
+  const applyAlpha = useCallback((next: number) => {
+    const clamped = Math.min(1, Math.max(0, next));
+    setDraftAlpha(clamped);
+    const normalized = normalizeHexColor(draftHex)?.slice(0, 7) ?? baseHex;
+    onChange(cssFromHexAlpha(normalized, clamped));
+  }, [baseHex, draftHex, onChange]);
+
+  const applyAlphaFromClientX = useCallback((clientX: number) => {
+    const rect = alphaTrackRef.current?.getBoundingClientRect();
+    if (!rect || rect.width <= 0) return;
+    const pct = (clientX - rect.left) / rect.width;
+    applyAlpha(pct);
+  }, [applyAlpha]);
+
   return (
     <div className="color-picker-root">
       <button
@@ -245,10 +262,32 @@ function ColorPicker({
               </div>
 
               <div className="color-alpha-row">
-                <span className="color-alpha-label">Opacity</span>
+                <span className="color-alpha-label">{t.rules.opacity}</span>
                 <div
                   className="color-alpha-track"
+                  ref={alphaTrackRef}
                   style={{ ['--alpha-pct' as any]: `${Math.round(draftAlpha * 100)}%` }}
+                  onPointerDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    try {
+                      e.currentTarget.setPointerCapture(e.pointerId);
+                    } catch {
+                      // ignore
+                    }
+                    applyAlphaFromClientX(e.clientX);
+                  }}
+                  onPointerMove={(e) => {
+                    if (e.buttons !== 1) return;
+                    applyAlphaFromClientX(e.clientX);
+                  }}
+                  onPointerUp={(e) => {
+                    try {
+                      e.currentTarget.releasePointerCapture(e.pointerId);
+                    } catch {
+                      // ignore
+                    }
+                  }}
                 >
                   <input
                     type="range"
@@ -259,18 +298,13 @@ function ColorPicker({
                     onMouseDown={(e) => e.stopPropagation()}
                     onPointerDown={(e) => e.stopPropagation()}
                     onInput={(e) => {
-                      const next = Math.min(1, Math.max(0, Number((e.target as HTMLInputElement).value) / 100));
-                      setDraftAlpha(next);
-                      const normalized = normalizeHexColor(draftHex)?.slice(0, 7) ?? baseHex;
-                      onChange(cssFromHexAlpha(normalized, next));
+                      applyAlpha(Number((e.target as HTMLInputElement).value) / 100);
                     }}
                     onChange={(e) => {
-                      const next = Math.min(1, Math.max(0, Number(e.target.value) / 100));
-                      setDraftAlpha(next);
-                      const normalized = normalizeHexColor(draftHex)?.slice(0, 7) ?? baseHex;
-                      onChange(cssFromHexAlpha(normalized, next));
+                      applyAlpha(Number(e.target.value) / 100);
                     }}
                   />
+                  <div className="color-alpha-thumb" style={{ left: `${Math.round(draftAlpha * 100)}%` }} />
                 </div>
                 <span className="color-alpha-value">{Math.round(draftAlpha * 100)}%</span>
               </div>
@@ -302,7 +336,7 @@ function ColorPicker({
                     }}
                     aria-label={ariaLabel}
                   />
-                  <span className="btn btn-ghost-dark">More</span>
+                  <span className="btn btn-ghost-dark">{t.rules.more}</span>
                 </label>
               </div>
             </div>,
@@ -362,6 +396,8 @@ function RulesPage({ rules, setRules, tags, setTags, vpnEnabled, restartVPN, aut
   const [ruleTagsPopover, setRuleTagsPopover] = useState<null | { ruleId: number; top: number; left: number }>(null);
   const ruleTagsAnchorRef = useRef<HTMLElement | null>(null);
   const ruleTagsPopoverRef = useRef<HTMLDivElement | null>(null);
+  const pageContentRef = useRef<HTMLDivElement | null>(null);
+  const popoverRafRef = useRef<number | null>(null);
 
   const [newTagName, setNewTagName] = useState('');
   const [newTagColor, setNewTagColor] = useState('#3b82f6');
@@ -647,9 +683,9 @@ function RulesPage({ rules, setRules, tags, setTags, vpnEnabled, restartVPN, aut
     return `${name.slice(0, max)}...`;
   }, []);
 
-  const openRuleTagsPopover = useCallback((ruleId: number, anchorEl: HTMLElement) => {
-    ruleTagsAnchorRef.current = anchorEl;
+  const computeRuleTagsPopoverPosition = useCallback((anchorEl: HTMLElement) => {
     const rect = anchorEl.getBoundingClientRect();
+
     const gap = 10;
     const popW = ruleTagsPopoverRef.current?.offsetWidth ?? 300;
     const popH = ruleTagsPopoverRef.current?.offsetHeight ?? 320;
@@ -673,8 +709,81 @@ function RulesPage({ rules, setRules, tags, setTags, vpnEnabled, restartVPN, aut
       const shiftAbove = Math.abs(topAbove - aboveTop);
       top = shiftAbove < shiftBelow ? topAbove : topBelow;
     }
-    setRuleTagsPopover(prev => (prev ? { ...prev, top, left } : { ruleId, top, left }));
+
+    return { top, left };
   }, []);
+
+  const closeRuleTagsPopover = useCallback(() => {
+    setRuleTagsPopover(null);
+    ruleTagsAnchorRef.current = null;
+  }, []);
+
+  const openRuleTagsPopover = useCallback((ruleId: number, anchorEl: HTMLElement) => {
+    ruleTagsAnchorRef.current = anchorEl;
+    const { top, left } = computeRuleTagsPopoverPosition(anchorEl);
+    setRuleTagsPopover({ ruleId, top, left });
+  }, [computeRuleTagsPopoverPosition]);
+
+  const updateRuleTagsPopoverPosition = useCallback(() => {
+    const anchorEl = ruleTagsAnchorRef.current;
+    if (!anchorEl) return;
+    if (!anchorEl.isConnected) {
+      closeRuleTagsPopover();
+      return;
+    }
+    const { top, left } = computeRuleTagsPopoverPosition(anchorEl);
+    setRuleTagsPopover(prev => (prev ? { ...prev, top, left } : prev));
+  }, [closeRuleTagsPopover, computeRuleTagsPopoverPosition]);
+
+  const scheduleRuleTagsPopoverUpdate = useCallback(() => {
+    if (popoverRafRef.current !== null) return;
+    popoverRafRef.current = window.requestAnimationFrame(() => {
+      popoverRafRef.current = null;
+      updateRuleTagsPopoverPosition();
+    });
+  }, [updateRuleTagsPopoverPosition]);
+
+  useEffect(() => {
+    if (!ruleTagsPopover) return;
+
+    const el = pageContentRef.current;
+    el?.addEventListener('scroll', scheduleRuleTagsPopoverUpdate, { passive: true });
+    window.addEventListener('resize', scheduleRuleTagsPopoverUpdate, { passive: true });
+
+    scheduleRuleTagsPopoverUpdate();
+
+    return () => {
+      el?.removeEventListener('scroll', scheduleRuleTagsPopoverUpdate);
+      window.removeEventListener('resize', scheduleRuleTagsPopoverUpdate);
+      if (popoverRafRef.current !== null) {
+        window.cancelAnimationFrame(popoverRafRef.current);
+        popoverRafRef.current = null;
+      }
+    };
+  }, [ruleTagsPopover, scheduleRuleTagsPopoverUpdate]);
+
+  useEffect(() => {
+    if (!ruleTagsPopover) return;
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeRuleTagsPopover();
+    };
+
+    const onPointerDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      if (target.closest('.rule-tags-popover')) return;
+      if (target.closest('.rule-tags-cell')) return;
+      closeRuleTagsPopover();
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('mousedown', onPointerDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('mousedown', onPointerDown);
+    };
+  }, [closeRuleTagsPopover, ruleTagsPopover]);
 
   const filteredRules = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -759,7 +868,7 @@ function RulesPage({ rules, setRules, tags, setTags, vpnEnabled, restartVPN, aut
   ], [t.rules.viaVpn, t.rules.direct]);
 
   return (
-    <div className="page-content">
+    <div className="page-content" ref={pageContentRef}>
       <div className="page-header">
         <h2 className="page-title">{t.rules.title}</h2>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
