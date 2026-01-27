@@ -60,6 +60,8 @@ export type Translations = {
     direct: string;
     noProcessesFound: string;
     searchRules: string;
+    opacity: string;
+    more: string;
     placeholder: {
       process: string;
       domain: string;
@@ -181,6 +183,8 @@ export const translations: Record<Language, Translations> = {
       status: 'Status',
       actions: 'Actions',
       searchRules: 'Search rules...',
+      opacity: 'Opacity',
+      more: 'More',
       loadingProcesses: 'Loading processes...',
       ipAddress: 'IP Address',
       processName: 'Process name',
@@ -313,6 +317,8 @@ export const translations: Record<Language, Translations> = {
       status: 'Статус',
       actions: 'Действия',
       searchRules: 'Поиск правил...',
+      opacity: 'Прозрачность',
+      more: 'Больше',
       loadingProcesses: 'Загрузка процессов...',
       domainkey: 'Кейворд',
       ipAddress: 'IP адрес',
@@ -446,6 +452,8 @@ export const translations: Record<Language, Translations> = {
       status: 'Статус',
       actions: 'Дзеянні',
       searchRules: 'Пошук правілаў...',
+      opacity: 'Празрыстасць',
+      more: 'Больш',
       loadingProcesses: 'Загрузка процессов...',
       noProcessesFound: 'Няма даступных працэсаў',
       domain: 'Дамен',

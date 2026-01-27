@@ -1332,10 +1332,21 @@ select.input option {
 }
 
 .rules-group {
-  margin-bottom: 0.9rem;
+  margin-bottom: 0;
   border: 1px solid rgba(55, 55, 60, 0.12);
-  border-radius: 0.9rem;
+  border-radius: 0;
   overflow: hidden;
+}
+
+.rules-group:first-child {
+  border-top-left-radius: 0.9rem;
+  border-top-right-radius: 0.9rem;
+}
+
+.rules-group:last-child {
+  margin-bottom: 0;
+  border-bottom-left-radius: 0.9rem;
+  border-bottom-right-radius: 0.9rem;
 }
 
 .rules-group-header-row {
@@ -1590,7 +1601,7 @@ select.input option {
   background: rgba(20, 20, 24, 0.92);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.35);
   overflow: hidden;
 }
 
@@ -1677,6 +1688,8 @@ select.input option {
   min-width: 100%;
   width: 100%;
   height: 22px;
+  border-radius: 9999px;
+  overflow: hidden;
 }
 
 .color-alpha-track::before {
@@ -1687,7 +1700,7 @@ select.input option {
   top: 50%;
   transform: translateY(-50%);
   height: 8px;
-  border-radius: 9999px;
+  border-radius: inherit;
   background: linear-gradient(
     90deg,
     var(--accent) 0%,
@@ -1697,6 +1710,20 @@ select.input option {
   );
   border: 1px solid rgba(255, 255, 255, 0.10);
   pointer-events: none;
+}
+
+.color-alpha-thumb {
+  position: absolute;
+  top: 50%;
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.45);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 2;
 }
 
 .color-alpha-column {
@@ -1725,10 +1752,24 @@ select.input option {
   transform: none;
   cursor: pointer;
   background: transparent;
+  background-color: transparent;
   border: none;
+  outline: none;
+  accent-color: transparent;
   pointer-events: auto;
   position: relative;
   z-index: 1;
+}
+
+.color-alpha-track .color-alpha-slider {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.color-alpha-slider::-webkit-slider-container {
+  background: transparent;
 }
 
 .color-alpha-slider::-webkit-slider-runnable-track {
@@ -1736,6 +1777,7 @@ select.input option {
   border-radius: 9999px;
   background: transparent;
   border: none;
+  box-shadow: none;
 }
 
 .color-alpha-slider::-webkit-slider-thumb {
@@ -1744,9 +1786,9 @@ select.input option {
   width: 16px;
   height: 16px;
   border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.95);
-  border: 1px solid rgba(0, 0, 0, 0.30);
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.45);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
   margin-top: -4px;
 }
 
@@ -1759,21 +1801,24 @@ select.input option {
   border-radius: 9999px;
   background: transparent;
   border: none;
+  box-shadow: none;
 }
 
 .color-alpha-slider::-moz-range-progress {
   height: 8px;
   border-radius: 9999px;
   background: transparent;
+  border: none;
+  box-shadow: none;
 }
 
 .color-alpha-slider::-moz-range-thumb {
   width: 16px;
   height: 16px;
   border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.95);
-  border: 1px solid rgba(0, 0, 0, 0.30);
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.45);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
 }
 
 .color-advanced {
