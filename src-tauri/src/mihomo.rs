@@ -626,6 +626,20 @@ pub fn generate_config(
     dns.insert("default-nameserver".into(), serde_yaml::Value::Sequence(vec![serde_yaml::Value::String("1.1.1.1".to_string()), serde_yaml::Value::String("8.8.8.8".to_string())]));
     dns.insert("nameserver".into(), serde_yaml::Value::Sequence(vec![serde_yaml::Value::String("https://1.1.1.1/dns-query".to_string()), serde_yaml::Value::String("https://8.8.8.8/dns-query".to_string())]));
     dns.insert("fallback".into(), serde_yaml::Value::Sequence(vec![serde_yaml::Value::String("https://dns.google/dns-query".to_string())]));
+    // ======= ДОБАВЬ ЭТУ СЕКЦИЮ =======
+    dns.insert("proxy-server-nameserver".into(),
+        serde_yaml::Value::Sequence(vec![
+            serde_yaml::Value::String("https://1.1.1.1/dns-query".to_string()),
+            serde_yaml::Value::String("https://8.8.8.8/dns-query".to_string())
+        ])
+    );
+    // =================================
+
+    dns.insert("fallback".into(), 
+        serde_yaml::Value::Sequence(vec![
+            serde_yaml::Value::String("https://dns.google/dns-query".to_string())
+        ])
+    );
 
     let mut fallback_filter = serde_yaml::Mapping::new();
     fallback_filter.insert("geoip".into(), serde_yaml::Value::Bool(true));
