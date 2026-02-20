@@ -153,7 +153,7 @@ body {
   justify-content: space-between;
   -webkit-app-region: drag;
   user-select: none;
-  z-index: 10001;
+  z-index: 100021;
 }
 
 .titlebar-left {
@@ -291,7 +291,7 @@ body {
   right: 0;
   bottom: 0;
   background: rgba(0, 0, 0, 0.55);
-  z-index: 9999;
+  z-index: 91999;
 }
 
 .sidebar-mac{
@@ -573,7 +573,7 @@ body {
   grid-template-columns: repeat(12, 1fr);
   gap: 1rem;
   padding: 1rem 1.5rem;
-  justify-items: end;
+  justify-items: stretch;
   align-items: center;
 }
 
@@ -595,11 +595,12 @@ body {
 
 .row {
   border-bottom: 0;
-  transition: background-color 0.15s;
+  transition: 0.15s ease;
 }
 
 .row:hover {
   background: var(--surface);
+  scale: 1.005;
 }
 
 /* Toggle */
@@ -836,6 +837,7 @@ select.input option {
 
 .btn:hover {
   transform: translateY(-1px);
+  scale: 1.02;
 }
 
 .btn-restart:disabled {
@@ -858,7 +860,8 @@ select.input option {
 }
 
 .btn:active {
-  transform: translateY(0);
+  transform: translateY(2px);
+  scale: .98;
 }
 
 .btn:focus:not(:focus-visible) {
@@ -1304,7 +1307,7 @@ select.input option {
   color: rgba(255, 255, 255, 0.92);
   background: rgba(15, 15, 15, 0.45);
   cursor: pointer;
-  transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease, border-color 0.12s ease;
+  transition: 0.15s ease;
   max-width: 16rem;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1316,18 +1319,13 @@ select.input option {
   box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.06);
 }
 
-.tag-filter-chip:active {
-  transform: translateY(0) scale(0.98);
-}
-
 .tag-filter-chip:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px var(--accent-dim);
+  outline: none
 }
 
 .tag-filter-chip.active {
   border-color: rgba(255, 255, 255, 0.22);
-  box-shadow: 0 0 0 3px var(--accent-dim);
+  scale: 1.1;
   filter: brightness(1.12) saturate(1.06);
 }
 
@@ -1355,7 +1353,6 @@ select.input option {
   gap: 0.65rem;
   padding: 0.7rem 1.5rem;
   background: rgba(15, 15, 15, 0.18);
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
   border-bottom: 0;
 }
 
@@ -1465,7 +1462,6 @@ select.input option {
   flex-wrap: nowrap;
   gap: 0.35rem;
   align-items: center;
-  justify-content: flex-end;
   min-width: 0;
 }
 

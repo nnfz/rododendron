@@ -1,34 +1,37 @@
-mod process_scanner;
 mod mihomo;
-mod autostart;
+mod process_scanner;
 mod updater;
 
-use process_scanner::get_running_processes;
 use mihomo::{
-    parse_config, generate_config, import_config,
-    start_vpn, stop_vpn, get_vpn_status,
-    reload_mihomo_config, switch_mihomo_mode, switch_proxy_group,
-    list_configs, read_config, delete_config,
-    save_rules_to_config, save_rules_to_path, export_config_to_path, resolve_config_path, get_mihomo_logs, clear_mihomo_logs,
-    get_mihomo_binary_name,
-    mihomo_get_traffic, mihomo_get_proxies, mihomo_get_connections, mihomo_get_delay, ping_host,
+    clear_mihomo_logs, delete_config, export_config_to_path, generate_config,
+    get_mihomo_binary_name, get_mihomo_logs, get_vpn_status, import_config, list_configs,
+    mihomo_get_connections, mihomo_get_delay, mihomo_get_proxies, mihomo_get_traffic,
+    parse_config, ping_host, read_config, reload_mihomo_config, resolve_config_path,
+    save_rules_to_config, save_rules_to_path, start_vpn, stop_vpn, switch_mihomo_mode,
+    switch_proxy_group,
+    cleanup_mihomo, health_check, restore_config_backup,
 };
-
-use autostart::set_autostart;
-
+use process_scanner::get_running_processes;
 use updater::{check_for_updates, install_update};
 
-use tauri::Manager;
-use tauri::Emitter;
-use tauri::{menu::{Menu, MenuItemBuilder}, tray::TrayIconBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
+use tauri::Emitter;
+use tauri::Manager;
+use tauri::{
+    menu::{Menu, MenuItemBuilder},
+    tray::TrayIconBuilder,
+};
+use tauri::RunEvent;
+use tauri_plugin_autostart::MacosLauncher;
 
-use image::Rgba;
 use image::codecs::png::PngEncoder;
 use image::ColorType;
 use image::ImageEncoder;
+use image::Rgba;
 
 use std::sync::{LazyLock, Mutex};
+
+// ─── Tray icon ───────────────────────────────────────────────────────────────
 
 fn build_tray_icon_png(vpn_enabled: bool) -> Result<tauri::image::Image<'static>, String> {
     let base_bytes: &[u8] = include_bytes!("../icons/32x32.png");
@@ -90,13 +93,16 @@ fn set_tray_vpn_enabled(app: tauri::AppHandle, enabled: bool) -> Result<(), Stri
     Ok(())
 }
 
+// ─── Close behavior ─────────────────────────────────────────────────────────
+
 #[derive(Clone, Copy)]
 enum CloseBehavior {
     Tray,
     Exit,
 }
 
-static CLOSE_BEHAVIOR: LazyLock<Mutex<CloseBehavior>> = LazyLock::new(|| Mutex::new(CloseBehavior::Tray));
+static CLOSE_BEHAVIOR: LazyLock<Mutex<CloseBehavior>> =
+    LazyLock::new(|| Mutex::new(CloseBehavior::Tray));
 
 #[tauri::command(rename_all = "camelCase")]
 fn set_close_behavior(behavior: String) -> Result<(), String> {
@@ -109,6 +115,8 @@ fn set_close_behavior(behavior: String) -> Result<(), String> {
     Ok(())
 }
 
+// ─── App entry ──────────────────────────────────────────────────────────────
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -116,7 +124,12 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            None,
+        ))
         .setup(|app| {
+            // ── Tray icon ──
             let icon = build_tray_icon_png(false)?;
             let start = MenuItemBuilder::with_id("tray_start", "Start").build(app)?;
             let stop = MenuItemBuilder::with_id("tray_stop", "Stop").build(app)?;
@@ -129,8 +142,15 @@ pub fn run() {
                 .icon(icon)
                 .menu(&menu)
                 .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::Click { button, button_state, .. } = event {
-                        if matches!(button, MouseButton::Left) && matches!(button_state, MouseButtonState::Down) {
+                    if let TrayIconEvent::Click {
+                        button,
+                        button_state,
+                        ..
+                    } = event
+                    {
+                        if matches!(button, MouseButton::Left)
+                            && matches!(button_state, MouseButtonState::Down)
+                        {
                             let app = tray.app_handle();
                             if let Some(window) = app.get_webview_window("main") {
                                 if window.is_visible().unwrap_or(false) {
@@ -144,45 +164,42 @@ pub fn run() {
                         }
                     }
                 })
-                .on_menu_event(|app, event| {
-                    match event.id().as_ref() {
-                        "tray_start" => {
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.emit("tray://start", ());
-                                let _ = window.show();
-                                let _ = window.unminimize();
-                                let _ = window.set_focus();
-                            }
+                .on_menu_event(|app, event| match event.id().as_ref() {
+                    "tray_start" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.emit("tray://start", ());
+                            let _ = window.show();
+                            let _ = window.unminimize();
+                            let _ = window.set_focus();
                         }
-                        "tray_stop" => {
-                            tauri::async_runtime::spawn(async move {
-                                let _ = stop_vpn().await;
-                            });
-                        }
-                        "tray_restart" => {
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.emit("tray://restart", ());
-                                let _ = window.show();
-                                let _ = window.unminimize();
-                                let _ = window.set_focus();
-                            }
-                        }
-                        "tray_show" => {
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.show();
-                                let _ = window.unminimize();
-                                let _ = window.set_focus();
-                            }
-                        }
-                        "tray_quit" => {
-                            let _ = tauri::async_runtime::block_on(async { stop_vpn().await });
-                            app.exit(0);
-                        }
-                        _ => {}
                     }
+                    "tray_stop" => {
+                        tauri::async_runtime::spawn(async move {
+                            let _ = stop_vpn().await;
+                        });
+                    }
+                    "tray_restart" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.emit("tray://restart", ());
+                            let _ = window.show();
+                            let _ = window.unminimize();
+                            let _ = window.set_focus();
+                        }
+                    }
+                    "tray_show" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.unminimize();
+                            let _ = window.set_focus();
+                        }
+                    }
+                    "tray_quit" => {
+                        cleanup_mihomo();
+                        app.exit(0);
+                    }
+                    _ => {}
                 })
                 .build(app)?;
-
 
             Ok(())
         })
@@ -198,10 +215,8 @@ pub fn run() {
 
                 match behavior {
                     CloseBehavior::Exit => {
-                        tauri::async_runtime::spawn(async move {
-                            let _ = stop_vpn().await;
-                            app.exit(0);
-                        });
+                        cleanup_mihomo();
+                        app.exit(0);
                     }
                     CloseBehavior::Tray => {
                         let _ = win.hide();
@@ -210,37 +225,58 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            // ── Process scanner ──
             get_running_processes,
+            // ── Config management ──
             parse_config,
             generate_config,
             import_config,
-            set_autostart,
-            set_close_behavior,
-            set_tray_vpn_enabled,
+            read_config,
+            delete_config,
+            list_configs,
+            export_config_to_path,
+            resolve_config_path,
+            restore_config_backup,
+            // ── Rules ──
+            save_rules_to_config,
+            save_rules_to_path,
+            // ── Core VPN ──
             start_vpn,
+            stop_vpn,
+            get_vpn_status,
             reload_mihomo_config,
             switch_mihomo_mode,
             switch_proxy_group,
-            stop_vpn,
-            get_vpn_status,
-            list_configs,
-            read_config,
-            delete_config,
-            get_mihomo_logs,
-            clear_mihomo_logs,
-            get_mihomo_binary_name,
-            save_rules_to_config,
-            save_rules_to_path,
-            export_config_to_path,
-            resolve_config_path,
+            // ── Mihomo API ──
             mihomo_get_traffic,
             mihomo_get_proxies,
             mihomo_get_connections,
             mihomo_get_delay,
+            // ── Logs ──
+            get_mihomo_logs,
+            clear_mihomo_logs,
+            // ── Utilities ──
             ping_host,
+            get_mihomo_binary_name,
+            health_check,
+            // ── UI ──
+            set_tray_vpn_enabled,
+            set_close_behavior,
+            // ── Updater ──
             check_for_updates,
             install_update,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        // ═══ .run() → .build().run() для перехвата Exit ═══
+        .build(tauri::generate_context!())
+        .expect("error building tauri application")
+        .run(|_app_handle, event| match event {
+            RunEvent::Exit => {
+                cleanup_mihomo();
+            }
+            RunEvent::ExitRequested { api, .. } => {
+                // Не блокируем выход — cleanup уже в Exit
+                let _ = api;
+            }
+            _ => {}
+        });
 }

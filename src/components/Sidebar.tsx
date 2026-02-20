@@ -11,11 +11,26 @@ interface SidebarProps {
   needsRestart?: boolean;
   hasConfig: boolean;
   hasUpdate?: boolean;
+  activeConfigName?: string | null;
   className?: string;
+  isOpen?: boolean;
 }
 
-function Sidebar({ activeTab, setActiveTab, vpnEnabled, restartVPN, needsRestart, hasConfig, hasUpdate, className }: SidebarProps) {
+function Sidebar({
+  activeTab,
+  setActiveTab,
+  vpnEnabled,
+  restartVPN,
+  needsRestart,
+  hasConfig,
+  hasUpdate,
+  activeConfigName,
+  className,
+  isOpen = true,
+}: SidebarProps) {
   const { t } = useI18n();
+
+  if (!isOpen) return null;
 
   const handleRestart = () => {
     if (vpnEnabled && hasConfig) {
@@ -27,7 +42,7 @@ function Sidebar({ activeTab, setActiveTab, vpnEnabled, restartVPN, needsRestart
     <div className={`sidebar ${className || ''}`.trim()}>
       <div className="sidebar-header">
         <h1 className="sidebar-title">{t.sidebar.title}</h1>
-        <p className="sidebar-subtitle">{t.sidebar.subtitle}</p>
+        <p className="sidebar-subtitle">{activeConfigName || t.sidebar.subtitle}</p>
       </div>
 
       <nav className="sidebar-nav">
@@ -63,9 +78,9 @@ function Sidebar({ activeTab, setActiveTab, vpnEnabled, restartVPN, needsRestart
       </nav>
 
       <div className="sidebar-footer">
-        <button 
-          className={`btn btn-ghost-dark btn-restart ${needsRestart ? 'needs-restart' : ''}`.trim()} 
-          onClick={handleRestart} 
+        <button
+          className={`btn btn-ghost-dark btn-restart ${needsRestart ? 'needs-restart' : ''}`.trim()}
+          onClick={handleRestart}
           disabled={!vpnEnabled || !hasConfig}
         >
           <LuRefreshCcw size={16} />
