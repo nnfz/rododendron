@@ -81,6 +81,7 @@ export type Translations = {
     deleteConfig: string;
     snowfall: string;
     logs: string;
+    editConfig: string;
     mainSettings: string;
     importurl: string;
     autoCheckUpdates: string;
@@ -223,6 +224,7 @@ export const translations: Record<Language, Translations> = {
       mainSettings: 'Main Settings',
       autoConnect: 'Auto connect',
       startminimized: 'Start minimized',
+      editConfig: 'Edit config',
       closeBehavior: 'Close button behavior',
       closeToTray: 'Minimize to tray',
       closeExit: 'Exit app',
@@ -357,6 +359,7 @@ export const translations: Record<Language, Translations> = {
       enableTun: 'Включить TUN',
       snowfall: 'Снежинки',
       logs: 'Логи',
+      editConfig: 'Редактировать конфиг',
       mainSettings: 'Основные настройки',
       autoLaunch: 'Автозапуск',
       startminimized: 'Запускать свёрнутым',
@@ -491,6 +494,7 @@ export const translations: Record<Language, Translations> = {
       autoCheckUpdates: 'Аўтапраўерка абнаўленняў',
       autoRestartOnRuleApply: 'Аўтапрымаўленне правіл',
       enableTun: 'Уключыць TUN',
+      editConfig: 'Рэдагаваць конфиг',
       logs: 'Логі',
       confirmDelete: 'Вы ўпэўнены?',
       snowfall: 'Сняжынкі',

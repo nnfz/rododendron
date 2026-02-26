@@ -1,5 +1,16 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { LuChevronRight, LuDownload, LuFileText, LuHelpCircle, LuRefreshCw, LuUpload, LuTrash2, LuX } from 'react-icons/lu';
+import {
+  LuChevronRight,
+  LuDownload,
+  LuFileText,
+  LuHelpCircle,
+  LuRefreshCw,
+  LuUpload,
+  LuTrash2,
+  LuX,
+  LuPencil,
+  LuSave,
+} from 'react-icons/lu';
 import CustomSelect from './CustomSelect';
 import { useI18n } from '../i18n';
 import type { Language } from '../i18n/translations';
@@ -46,7 +57,6 @@ const EASTER_EGG_IMAGE_URLS: string[] = [
   'https://sun9-15.userapi.com/s/v1/ig2/QJ-d3NRMWhjIgbWkQ4BAMEweNhpfEsxSmvvJzltIZ_rdryR-5hIH4GYBHVmG7V7aTu4P1BGgzAVQduWf5ibgFKpI.jpg?quality=95&as=32x48,48x72,72x108,108x162,160x240,183x275&from=bu&cs=183x0',
 ];
 
-// ✅ Вынесено за пределы компонента — не пересоздаётся при каждом рендере
 const autostartPlugin = {
   async enable() {
     const { enable } = await import('@tauri-apps/plugin-autostart');
@@ -63,16 +73,338 @@ const autostartPlugin = {
   },
 };
 
+// ─── Парсер протокольных ссылок ──────────────────────────────────────────────
+
+function parseVlessLink(text: string): { yaml: string; filename: string } {
+  const url = new URL(text);
+  if (url.protocol !== 'vless:') throw new Error('Not a vless:// link');
+  if (!url.username) throw new Error('Missing UUID in vless:// link');
+
+  const name = decodeURIComponent((url.hash || '').replace(/^#/, '')).trim() || 'VLESS';
+  const server = url.hostname;
+  const port = url.port ? Number(url.port) : 443;
+  const network = (url.searchParams.get('type') || 'tcp').toLowerCase();
+  const security = (url.searchParams.get('security') || '').toLowerCase();
+  const pbk = url.searchParams.get('pbk') || '';
+  const fp = url.searchParams.get('fp') || '';
+  const sni = url.searchParams.get('sni') || '';
+  const sid = url.searchParams.get('sid') || '';
+  const flow = url.searchParams.get('flow') || '';
+  const tlsEnabled = security === 'reality' || security === 'tls';
+
+  const safeName = name.replace(/[\\/:*?"<>|]+/g, '-').slice(0, 60) || 'VLESS';
+  const filename = `${safeName}.yaml`;
+
+  const yaml = [
+    'mixed-port: 7890',
+    'allow-lan: false',
+    'mode: rule',
+    'log-level: info',
+    '',
+    'proxies:',
+    `  - name: "${name}"`,
+    '    type: vless',
+    `    server: ${server}`,
+    `    port: ${port}`,
+    `    uuid: ${url.username}`,
+    '    udp: true',
+    '    packet-encoding: xudp',
+    `    network: ${network}`,
+    `    tls: ${tlsEnabled}`,
+    ...(sni ? [`    servername: ${sni}`] : []),
+    ...(fp ? [`    client-fingerprint: ${fp}`] : []),
+    ...(flow ? [`    flow: ${flow}`] : []),
+    ...(security === 'reality'
+      ? [
+          '    reality-opts:',
+          ...(pbk ? [`      public-key: ${pbk}`] : []),
+          ...(sid ? [`      short-id: ${sid}`] : []),
+        ]
+      : []),
+    '',
+    'proxy-groups:',
+    '  - name: PROXY',
+    '    type: select',
+    '    proxies:',
+    `      - "${name}"`,
+    '      - DIRECT',
+    '',
+    'rules:',
+    '  - MATCH,PROXY',
+    '',
+  ].join('\n');
+
+  return { yaml, filename };
+}
+
+function parseHysteria2Link(text: string): { yaml: string; filename: string } {
+  // Убираем протокол
+  const stripped = text.replace(/^(hysteria2|hy2):\/\//, '');
+
+  // Отделяем #fragment (имя)
+  const hashIdx = stripped.indexOf('#');
+  const withoutHash = hashIdx >= 0 ? stripped.slice(0, hashIdx) : stripped;
+  const name =
+    hashIdx >= 0
+      ? decodeURIComponent(stripped.slice(hashIdx + 1)).trim() || 'Hysteria2'
+      : 'Hysteria2';
+
+  // Отделяем ?query
+  const qIdx = withoutHash.indexOf('?');
+  const beforeQuery = qIdx >= 0 ? withoutHash.slice(0, qIdx) : withoutHash;
+  const queryString = qIdx >= 0 ? withoutHash.slice(qIdx + 1) : '';
+
+  // Ищем ПОСЛЕДНИЙ @ — всё до него это пароль, после — host:port
+  const lastAtIdx = beforeQuery.lastIndexOf('@');
+  if (lastAtIdx === -1) throw new Error('Missing @ in hysteria2:// link');
+
+  const password = decodeURIComponent(beforeQuery.slice(0, lastAtIdx));
+  const hostPortRaw = beforeQuery.slice(lastAtIdx + 1).split('/')[0]; // убираем trailing path
+
+  if (!password) throw new Error('Missing password in hysteria2:// link');
+
+  // Парсим host:port
+  let server: string;
+  let port: number;
+
+  if (hostPortRaw.startsWith('[')) {
+    // IPv6: [::1]:8443
+    const closeBracket = hostPortRaw.indexOf(']');
+    server = hostPortRaw.slice(1, closeBracket);
+    port = Number(hostPortRaw.slice(closeBracket + 2)) || 443;
+  } else {
+    const colonIdx = hostPortRaw.lastIndexOf(':');
+    if (colonIdx > 0) {
+      server = hostPortRaw.slice(0, colonIdx);
+      port = Number(hostPortRaw.slice(colonIdx + 1)) || 443;
+    } else {
+      server = hostPortRaw;
+      port = 443;
+    }
+  }
+
+  if (!server) throw new Error('Missing server in hysteria2:// link');
+
+  // Парсим query-параметры
+  const params = new URLSearchParams(queryString);
+  const sni = params.get('sni') || '';
+  const insecure = params.get('insecure') === '1';
+  const obfs = params.get('obfs') || '';
+  const obfsPassword = params.get('obfs-password') || '';
+  const upMbps = params.get('up') || '';
+  const downMbps = params.get('down') || '';
+  const alpn = params.get('alpn') || '';
+
+  const safeName = name.replace(/[\\/:*?"<>|]+/g, '-').slice(0, 60) || 'Hysteria2';
+  const filename = `${safeName}.yaml`;
+
+  const proxyLines: string[] = [
+    `  - name: "${name}"`,
+    '    type: hysteria2',
+    `    server: ${server}`,
+    `    port: ${port}`,
+    `    password: "${password}"`,
+  ];
+
+  if (sni) proxyLines.push(`    sni: ${sni}`);
+  if (insecure) proxyLines.push('    skip-cert-verify: true');
+  if (alpn) {
+    const alpnList = alpn.split(',').map((a) => a.trim()).filter(Boolean);
+    proxyLines.push('    alpn:');
+    alpnList.forEach((a) => proxyLines.push(`      - ${a}`));
+  }
+  if (obfs === 'salamander' && obfsPassword) {
+    proxyLines.push('    obfs: salamander');
+    proxyLines.push(`    obfs-password: "${obfsPassword}"`);
+  }
+  if (upMbps) proxyLines.push(`    up: "${upMbps} Mbps"`);
+  if (downMbps) proxyLines.push(`    down: "${downMbps} Mbps"`);
+
+  const yaml = [
+    'mixed-port: 7890',
+    'allow-lan: false',
+    'mode: rule',
+    'log-level: info',
+    '',
+    'proxies:',
+    ...proxyLines,
+    '',
+    'proxy-groups:',
+    '  - name: PROXY',
+    '    type: select',
+    '    proxies:',
+    `      - "${name}"`,
+    '      - DIRECT',
+    '',
+    'rules:',
+    '  - MATCH,PROXY',
+    '',
+  ].join('\n');
+
+  return { yaml, filename };
+}
+
+function parseShadowsocksLink(text: string): { yaml: string; filename: string } {
+  const url = new URL(text);
+  if (url.protocol !== 'ss:') throw new Error('Not a ss:// link');
+
+  const name = decodeURIComponent((url.hash || '').replace(/^#/, '')).trim() || 'Shadowsocks';
+
+  // ss://base64(method:password)@host:port#name
+  // or ss://base64(method:password@host:port)#name
+  let method = '';
+  let password = '';
+  let server = url.hostname;
+  let port = url.port ? Number(url.port) : 0;
+
+  if (server && port) {
+    // Новый формат: ss://base64@host:port
+    const decoded = atob(url.username);
+    const colonIdx = decoded.indexOf(':');
+    if (colonIdx > 0) {
+      method = decoded.slice(0, colonIdx);
+      password = decoded.slice(colonIdx + 1);
+    }
+  } else {
+    // Старый формат: ss://base64(all)
+    const path = text.replace(/^ss:\/\//, '').split('#')[0];
+    const decoded = atob(path);
+    const atIdx = decoded.lastIndexOf('@');
+    if (atIdx > 0) {
+      const userInfo = decoded.slice(0, atIdx);
+      const hostPort = decoded.slice(atIdx + 1);
+      const colonIdx = userInfo.indexOf(':');
+      method = userInfo.slice(0, colonIdx);
+      password = userInfo.slice(colonIdx + 1);
+      const hpParts = hostPort.split(':');
+      server = hpParts[0];
+      port = Number(hpParts[1]) || 443;
+    }
+  }
+
+  if (!server || !port || !method || !password) {
+    throw new Error('Failed to parse ss:// link');
+  }
+
+  const safeName = name.replace(/[\\/:*?"<>|]+/g, '-').slice(0, 60) || 'Shadowsocks';
+  const filename = `${safeName}.yaml`;
+
+  const yaml = [
+    'mixed-port: 7890',
+    'allow-lan: false',
+    'mode: rule',
+    'log-level: info',
+    '',
+    'proxies:',
+    `  - name: "${name}"`,
+    '    type: ss',
+    `    server: ${server}`,
+    `    port: ${port}`,
+    `    cipher: ${method}`,
+    `    password: "${password}"`,
+    '    udp: true',
+    '',
+    'proxy-groups:',
+    '  - name: PROXY',
+    '    type: select',
+    '    proxies:',
+    `      - "${name}"`,
+    '      - DIRECT',
+    '',
+    'rules:',
+    '  - MATCH,PROXY',
+    '',
+  ].join('\n');
+
+  return { yaml, filename };
+}
+
+function parseTrojanLink(text: string): { yaml: string; filename: string } {
+  const url = new URL(text);
+  if (url.protocol !== 'trojan:') throw new Error('Not a trojan:// link');
+
+  const name = decodeURIComponent((url.hash || '').replace(/^#/, '')).trim() || 'Trojan';
+  const password = decodeURIComponent(url.username);
+  const server = url.hostname;
+  const port = url.port ? Number(url.port) : 443;
+  const sni = url.searchParams.get('sni') || '';
+  const alpn = url.searchParams.get('alpn') || '';
+  const insecure = url.searchParams.get('allowInsecure') === '1';
+
+  if (!password || !server) throw new Error('Missing password or server in trojan:// link');
+
+  const safeName = name.replace(/[\\/:*?"<>|]+/g, '-').slice(0, 60) || 'Trojan';
+  const filename = `${safeName}.yaml`;
+
+  const proxyLines: string[] = [
+    `  - name: "${name}"`,
+    '    type: trojan',
+    `    server: ${server}`,
+    `    port: ${port}`,
+    `    password: "${password}"`,
+    '    udp: true',
+  ];
+
+  if (sni) proxyLines.push(`    sni: ${sni}`);
+  if (insecure) proxyLines.push('    skip-cert-verify: true');
+  if (alpn) {
+    const alpnList = alpn.split(',').map((a) => a.trim()).filter(Boolean);
+    proxyLines.push('    alpn:');
+    alpnList.forEach((a) => proxyLines.push(`      - ${a}`));
+  }
+
+  const yaml = [
+    'mixed-port: 7890',
+    'allow-lan: false',
+    'mode: rule',
+    'log-level: info',
+    '',
+    'proxies:',
+    ...proxyLines,
+    '',
+    'proxy-groups:',
+    '  - name: PROXY',
+    '    type: select',
+    '    proxies:',
+    `      - "${name}"`,
+    '      - DIRECT',
+    '',
+    'rules:',
+    '  - MATCH,PROXY',
+    '',
+  ].join('\n');
+
+  return { yaml, filename };
+}
+
+function parseProxyLink(text: string): { yaml: string; filename: string } {
+  const trimmed = text.trim();
+
+  if (trimmed.startsWith('vless://')) return parseVlessLink(trimmed);
+  if (trimmed.startsWith('hysteria2://') || trimmed.startsWith('hy2://'))
+    return parseHysteria2Link(trimmed);
+  if (trimmed.startsWith('ss://')) return parseShadowsocksLink(trimmed);
+  if (trimmed.startsWith('trojan://')) return parseTrojanLink(trimmed);
+
+  throw new Error(
+    'Unsupported link format. Supported: vless://, hysteria2://, hy2://, ss://, trojan://',
+  );
+}
+
+// ─── Компонент ───────────────────────────────────────────────────────────────
+
 function SettingsPage({
   setShowLogsModal,
   configs,
   setConfigs,
   activeConfigId,
   setActiveConfigId,
-  settings,
-  setSettings,
+  setActiveConfigContent,
+  setParsedConfig,
   vpnEnabled,
   restartVPN,
+  settings,
+  setSettings,
   availableUpdateVersion,
 }: SettingsPageProps) {
   const { t, language, setLanguage } = useI18n();
@@ -89,12 +421,17 @@ function SettingsPage({
   const [vlessImportError, setVlessImportError] = useState<string | null>(null);
   const [isImportingVless, setIsImportingVless] = useState(false);
 
+  // Config editor modal
+  const [showConfigEditor, setShowConfigEditor] = useState(false);
+  const [configEditorContent, setConfigEditorContent] = useState('');
+  const [configEditorError, setConfigEditorError] = useState<string | null>(null);
+  const [isSavingConfig, setIsSavingConfig] = useState(false);
+
   const [versionClickCount, setVersionClickCount] = useState(0);
   const [versionKickColor, setVersionKickColor] = useState<string | null>(null);
   const [showEasterEggModal, setShowEasterEggModal] = useState(false);
   const [easterEggImageUrl, setEasterEggImageUrl] = useState<string | null>(null);
 
-  // Загрузка имени бинаря mihomo
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
@@ -110,42 +447,32 @@ function SettingsPage({
         // ignore
       }
     };
-
     load();
     return () => {
       cancelled = true;
     };
   }, []);
 
-  // ✅ Синхронизация реального состояния автозапуска из системы при монтировании
   useEffect(() => {
     if (!isTauri()) return;
     let cancelled = false;
-
     autostartPlugin
       .isEnabled()
       .then((enabled) => {
-        if (!cancelled) {
-          setSettings((prev) => ({ ...prev, autostart: enabled }));
-        }
+        if (!cancelled) setSettings((prev) => ({ ...prev, autostart: enabled }));
       })
       .catch((e) => console.error('Failed to sync autostart state:', e));
-
     return () => {
       cancelled = true;
     };
   }, [setSettings]);
 
-  // Очистка таймера подтверждения удаления
   useEffect(() => {
     return () => {
-      if (deleteConfirmTimeoutRef.current) {
-        clearTimeout(deleteConfirmTimeoutRef.current);
-      }
+      if (deleteConfirmTimeoutRef.current) clearTimeout(deleteConfirmTimeoutRef.current);
     };
   }, []);
 
-  // ✅ toggleSetting с поддержкой autostart через плагин
   const toggleSetting = useCallback(
     async (key: keyof Settings) => {
       try {
@@ -155,24 +482,18 @@ function SettingsPage({
           return { ...prev, [key]: nextValue };
         });
 
-        // ✅ Автозапуск — вызываем плагин
         if (key === 'autostart') {
           if (!isTauri()) return;
           try {
-            if (nextValue) {
-              await autostartPlugin.enable();
-            } else {
-              await autostartPlugin.disable();
-            }
+            if (nextValue) await autostartPlugin.enable();
+            else await autostartPlugin.disable();
           } catch (e) {
             console.error('Failed to set autostart:', e);
-            // Откатываем UI если плагин упал
             setSettings((prev) => ({ ...prev, [key]: !nextValue }));
             return;
           }
         }
 
-        // Перезапуск VPN при изменении соответствующих настроек
         const settingsRequiringRestart: (keyof Settings)[] = ['enableTun', 'killSwitch'];
         if (vpnEnabled && settingsRequiringRestart.includes(key)) {
           try {
@@ -195,7 +516,6 @@ function SettingsPage({
       setUpdateStatusText(t.settings.updateError);
       return;
     }
-
     setIsCheckingUpdates(true);
     setIsInstallingUpdate(false);
     setUpdateStatusText(t.settings.checkingUpdates);
@@ -203,7 +523,6 @@ function SettingsPage({
       const { invoke } = await import('@tauri-apps/api/core');
       const res = (await invoke('check_for_updates')) as UpdateCheckResult;
       setUpdateCheck(res);
-
       if (!res?.update_available) {
         setUpdateStatusText(t.settings.upToDate);
       } else {
@@ -224,7 +543,6 @@ function SettingsPage({
       setUpdateStatusText(t.settings.updateError);
       return;
     }
-
     setIsInstallingUpdate(true);
     setUpdateStatusText(t.settings.installingUpdate);
     try {
@@ -240,15 +558,12 @@ function SettingsPage({
   const handleMtuChange = useCallback(
     async (value: string) => {
       const numValue = parseInt(value, 10);
-
       if (value && (numValue < MTU_MIN || numValue > MTU_MAX)) {
         setMtuError(true);
         setTimeout(() => setMtuError(false), 400);
         return;
       }
-
       setSettings((prev) => ({ ...prev, mtu: value }));
-
       if (vpnEnabled && value) {
         await new Promise((resolve) => setTimeout(resolve, 100));
         await restartVPN();
@@ -261,105 +576,37 @@ function SettingsPage({
     async (event: React.ChangeEvent<HTMLInputElement>) => {
       const file = event.target.files?.[0];
       if (!file) return;
-
       const content = await file.text();
       const filename = file.name;
-
       if (isTauri()) {
         try {
           const { invoke } = await import('@tauri-apps/api/core');
           await invoke('import_config', { configContent: content, filename });
-
           const newConfig: Config = {
             id: `config-${Date.now()}-${filename}`,
             name: filename.replace(/\.(yaml|yml)$/, ''),
             filename,
           };
-
           setConfigs((prev) => [...prev, newConfig]);
           setActiveConfigId(newConfig.id);
         } catch (e) {
           console.error('Failed to import config:', e);
         }
       }
-
       if (fileInputRef.current) fileInputRef.current.value = '';
     },
     [setConfigs, setActiveConfigId],
   );
 
-  const importVlessFromText = useCallback(
+  // ─── Универсальный импорт ссылок ────────────────────────────────────────────
+
+  const importProxyFromText = useCallback(
     async (raw: string) => {
       if (!isTauri()) return;
       const text = raw.trim();
-      if (!text) return;
+      if (!text) throw new Error('Empty clipboard');
 
-      const url = new URL(text);
-      if (url.protocol !== 'vless:') {
-        throw new Error('Clipboard does not contain a vless:// link');
-      }
-      if (!url.username) {
-        throw new Error('Missing UUID in vless:// link');
-      }
-
-      const name =
-        decodeURIComponent((url.hash || '').replace(/^#/, '')).trim() || 'VLESS';
-      const server = url.hostname;
-      const port = url.port ? Number(url.port) : 443;
-
-      const network = (url.searchParams.get('type') || 'tcp').toLowerCase();
-      const security = (url.searchParams.get('security') || '').toLowerCase();
-      const pbk = url.searchParams.get('pbk') || '';
-      const fp = url.searchParams.get('fp') || '';
-      const sni = url.searchParams.get('sni') || '';
-      const sid = url.searchParams.get('sid') || '';
-      const flow = url.searchParams.get('flow') || '';
-
-      const tlsEnabled = security === 'reality' || security === 'tls';
-
-      const safeName = name.replace(/[\\/:*?"<>|]+/g, '-').slice(0, 60) || 'VLESS';
-      const filename = `${safeName}.yaml`;
-
-      const yaml = [
-        'mixed-port: 7890',
-        'allow-lan: false',
-        'mode: rule',
-        'log-level: info',
-        '',
-        'proxies:',
-        `  - name: ${name}`,
-        '    type: vless',
-        `    server: ${server}`,
-        `    port: ${port}`,
-        `    uuid: ${url.username}`,
-        '    udp: true',
-        '    packet-encoding: xudp',
-        `    network: ${network}`,
-        '',
-        `    tls: ${tlsEnabled ? 'true' : 'false'}`,
-        ...(sni ? [`    servername: ${sni}`] : []),
-        ...(fp ? [`    client-fingerprint: ${fp}`] : []),
-        ...(flow ? [`    flow: ${flow}`] : []),
-        '',
-        ...(security === 'reality'
-          ? [
-              '    reality-opts:',
-              ...(pbk ? [`      public-key: ${pbk}`] : []),
-              ...(sid ? [`      short-id: ${sid}`] : []),
-            ]
-          : []),
-        '',
-        'proxy-groups:',
-        '  - name: PROXY',
-        '    type: select',
-        '    proxies:',
-        `      - ${name}`,
-        '      - DIRECT',
-        '',
-        'rules:',
-        '- MATCH,PROXY',
-        '',
-      ].join('\n');
+      const { yaml, filename } = parseProxyLink(text);
 
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('import_config', { configContent: yaml, filename });
@@ -375,41 +622,33 @@ function SettingsPage({
     [setConfigs, setActiveConfigId],
   );
 
-  const handleImportVlessFromClipboard = useCallback(async () => {
+  const handleImportFromClipboard = useCallback(async () => {
     if (!isTauri()) return;
-
     setVlessImportError(null);
     setIsImportingVless(true);
     try {
       const text = await navigator.clipboard.readText();
-      await importVlessFromText(text);
+      await importProxyFromText(text);
     } catch (e) {
       setVlessImportError(e instanceof Error ? e.message : String(e));
     } finally {
       setIsImportingVless(false);
     }
-  }, [importVlessFromText]);
+  }, [importProxyFromText]);
 
   const handleExportConfig = useCallback(async () => {
     if (!activeConfigId || !isTauri()) return;
-
     const config = configs.find((c) => c.id === activeConfigId);
     if (!config?.filename) return;
-
     try {
       const { invoke } = await import('@tauri-apps/api/core');
       const { save } = await import('@tauri-apps/plugin-dialog');
-
       const filePath = await save({
         defaultPath: config.filename,
         filters: [{ name: 'YAML', extensions: ['yaml', 'yml'] }],
       });
-
       if (!filePath) return;
-      await invoke('export_config_to_path', {
-        filename: config.filename,
-        path: filePath,
-      });
+      await invoke('export_config_to_path', { filename: config.filename, path: filePath });
     } catch (e) {
       console.error('Failed to export config:', e);
     }
@@ -417,14 +656,11 @@ function SettingsPage({
 
   const handleDeleteConfig = useCallback(async () => {
     if (!activeConfigId || !isTauri()) return;
-
     const config = configs.find((c) => c.id === activeConfigId);
     if (!config) return;
-
     try {
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('delete_config', { filename: config.filename });
-
       const newConfigs = configs.filter((c) => c.id !== activeConfigId);
       setConfigs(newConfigs);
       setActiveConfigId(newConfigs[0]?.id || '');
@@ -437,11 +673,7 @@ function SettingsPage({
   const handleDeleteClick = useCallback(() => {
     if (!showDeleteConfirm) {
       setShowDeleteConfirm(true);
-
-      if (deleteConfirmTimeoutRef.current) {
-        clearTimeout(deleteConfirmTimeoutRef.current);
-      }
-
+      if (deleteConfirmTimeoutRef.current) clearTimeout(deleteConfirmTimeoutRef.current);
       deleteConfirmTimeoutRef.current = setTimeout(() => {
         setShowDeleteConfirm(false);
         deleteConfirmTimeoutRef.current = null;
@@ -454,6 +686,85 @@ function SettingsPage({
       handleDeleteConfig();
     }
   }, [showDeleteConfirm, handleDeleteConfig]);
+
+  // ─── Config Editor ──────────────────────────────────────────────────────────
+
+  const handleOpenConfigEditor = useCallback(async () => {
+    if (!activeConfigId || !isTauri()) return;
+    const config = configs.find((c) => c.id === activeConfigId);
+    if (!config?.filename) return;
+
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const content = await invoke<string>('read_config', { filename: config.filename });
+      setConfigEditorContent(content);
+      setConfigEditorError(null);
+      setShowConfigEditor(true);
+    } catch (e) {
+      console.error('Failed to read config:', e);
+    }
+  }, [activeConfigId, configs]);
+
+  const handleSaveConfigEditor = useCallback(async () => {
+    if (!activeConfigId || !isTauri()) return;
+    const config = configs.find((c) => c.id === activeConfigId);
+    if (!config?.filename) return;
+
+    setIsSavingConfig(true);
+    setConfigEditorError(null);
+
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+
+      // Валидация YAML
+      try {
+        await invoke('parse_config', { configContent: configEditorContent });
+      } catch (e) {
+        setConfigEditorError(`Invalid config: ${e}`);
+        setIsSavingConfig(false);
+        return;
+      }
+
+      await invoke('import_config', {
+        configContent: configEditorContent,
+        filename: config.filename,
+      });
+
+      // Обновляем контент в родительском компоненте
+      setActiveConfigContent(configEditorContent);
+      try {
+        const parsed = await invoke<ParsedConfig>('parse_config', {
+          configContent: configEditorContent,
+        });
+        setParsedConfig(parsed);
+      } catch {
+        // не критично
+      }
+
+      setShowConfigEditor(false);
+
+      // Перезапускаем VPN если он запущен
+      if (vpnEnabled) {
+        try {
+          await restartVPN();
+        } catch (e) {
+          console.error('Failed to restart VPN after config edit:', e);
+        }
+      }
+    } catch (e) {
+      setConfigEditorError(`Failed to save: ${e}`);
+    } finally {
+      setIsSavingConfig(false);
+    }
+  }, [
+    activeConfigId,
+    configs,
+    configEditorContent,
+    vpnEnabled,
+    restartVPN,
+    setActiveConfigContent,
+    setParsedConfig,
+  ]);
 
   const handleLanguageChange = useCallback(
     (lang: Language) => {
@@ -491,14 +802,12 @@ function SettingsPage({
   const handleVersionEasterEggClick = useCallback(() => {
     setVersionClickCount((prev) => {
       const next = prev + 1;
-
       if (next >= 6) {
         const randomHue = Math.floor(Math.random() * 360);
         const randomSat = 70 + Math.floor(Math.random() * 20);
         const randomLight = 55 + Math.floor(Math.random() * 10);
         setVersionKickColor(`hsl(${randomHue} ${randomSat}% ${randomLight}%)`);
       }
-
       if (next >= 10) {
         const urls = EASTER_EGG_IMAGE_URLS.filter(Boolean);
         const url = urls.length ? urls[Math.floor(Math.random() * urls.length)] : null;
@@ -507,7 +816,6 @@ function SettingsPage({
         setVersionKickColor(null);
         return 0;
       }
-
       return next;
     });
   }, []);
@@ -526,7 +834,7 @@ function SettingsPage({
               <div className="setting-top">
                 <button
                   type="button"
-                  onClick={handleImportVlessFromClipboard}
+                  onClick={handleImportFromClipboard}
                   className="btn btn-ghost-dark"
                   disabled={isImportingVless}
                 >
@@ -572,6 +880,14 @@ function SettingsPage({
                 <LuDownload size={18} />
                 <span className="setting-label">{t.settings.exportConfig}</span>
               </button>
+              <button
+                onClick={handleOpenConfigEditor}
+                className="config-action-btn"
+                disabled={!activeConfigId}
+              >
+                <LuPencil size={18} />
+                <span className="setting-label">{t.settings.editConfig || 'Edit Config'}</span>
+              </button>
             </div>
             <input
               ref={fileInputRef}
@@ -583,7 +899,9 @@ function SettingsPage({
 
             {vlessImportError && (
               <div className="panel-row disabled">
-                <span className="setting-label">{vlessImportError}</span>
+                <span className="setting-label" style={{ color: 'var(--color-error, #f44)' }}>
+                  {vlessImportError}
+                </span>
               </div>
             )}
           </div>
@@ -755,9 +1073,7 @@ function SettingsPage({
                 value={settings.mtu}
                 onChange={(e) => handleMtuChange(e.target.value.replace(/\D/g, ''))}
                 onBlur={() => {
-                  if (!settings.mtu) {
-                    setSettings((prev) => ({ ...prev, mtu: MTU_DEFAULT }));
-                  }
+                  if (!settings.mtu) setSettings((prev) => ({ ...prev, mtu: MTU_DEFAULT }));
                 }}
                 className={`input ${mtuError ? 'input-error input-shake' : ''}`}
               />
@@ -838,7 +1154,6 @@ function SettingsPage({
                   </div>
                 </span>
               </button>
-
               {updateCheck?.update_available && (
                 <button
                   onClick={handleInstallUpdate}
@@ -850,7 +1165,6 @@ function SettingsPage({
                 </button>
               )}
             </div>
-
             {updateStatusText && (
               <div className="panel-row disabled">
                 <span className="setting-label">{updateStatusText}</span>
@@ -860,6 +1174,62 @@ function SettingsPage({
         </div>
       </div>
 
+      {/* ─── Config Editor Modal ──────────────────────────────────────────── */}
+      {showConfigEditor && (
+        <div
+          className="modal-backdrop animate-fadeIn"
+          onClick={() => setShowConfigEditor(false)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div
+            className="modal config-editor-modal animate-scaleIn"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-header">
+              <h3 className="modal-title">
+                {t.settings.editConfig || 'Edit Config'}
+                {' — '}
+                {configs.find((c) => c.id === activeConfigId)?.name || ''}
+              </h3>
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  onClick={handleSaveConfigEditor}
+                  className="btn btn-icon"
+                  disabled={isSavingConfig}
+                  aria-label="Save"
+                  title="Save"
+                >
+                  <LuSave size={20} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowConfigEditor(false)}
+                  className="btn btn-icon"
+                  aria-label={t.common.close}
+                >
+                  <LuX size={20} />
+                </button>
+              </div>
+            </div>
+            <div className="modal-body config-editor-body">
+              {configEditorError && (
+                <div className="config-editor-error">{configEditorError}</div>
+              )}
+              <textarea
+                className="config-editor-textarea"
+                value={configEditorContent}
+                onChange={(e) => setConfigEditorContent(e.target.value)}
+                spellCheck={false}
+                autoFocus
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Easter Egg Modal ─────────────────────────────────────────────── */}
       {showEasterEggModal && (
         <div
           className="modal-backdrop animate-fadeIn"

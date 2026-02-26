@@ -2565,3 +2565,49 @@ select.input option {
   display: flex;
   gap: 12px;
 }
+
+/* ─── Config Editor Modal ─────────────────────────────── */
+
+.config-editor-modal {
+  width: 90vw;
+  max-width: 800px;
+  height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.config-editor-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0 !important;
+}
+
+.config-editor-textarea {
+  flex: 1;
+  width: 100%;
+  resize: none;
+  border: none;
+  outline: none;
+  padding: 16px;
+  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Consolas', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  tab-size: 2;
+  background: var(--color-bg, #1a1a2e);
+  color: var(--color-text, #e0e0e0);
+  overflow: auto;
+}
+
+.config-editor-textarea:focus {
+  outline: none;
+}
+
+.config-editor-error {
+  padding: 8px 16px;
+  background: rgba(255, 68, 68, 0.15);
+  color: #f44;
+  font-size: 13px;
+  border-bottom: 1px solid rgba(255, 68, 68, 0.3);
+}
