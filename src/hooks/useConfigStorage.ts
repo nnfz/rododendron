@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback, type Dispatch, type SetStateAction } from 'react';
 import type { Config, ParsedConfig } from '../types';
 import { isTauri } from '../utils/isTauri';
+
 const ACTIVE_KEY = 'vpn-active-config';
 
 export type { Config };
@@ -15,6 +16,11 @@ export function useConfigStorage(
   const [activeConfigContent, setActiveConfigContent] = useState<string | null>(null);
   const [parsedConfig, setParsedConfig] = useState<ParsedConfig | null>(null);
 
+  // Track whether content was manually set (e.g. from editor save)
+  // to skip the next auto-reload
+  const skipNextReload = useRef(false);
+  const prevActiveConfig = useRef(activeConfig);
+
   // Load configs on mount
   useEffect(() => {
     const loadConfigs = async () => {
@@ -28,10 +34,10 @@ export function useConfigStorage(
             filename,
           }));
           setConfigs(loadedConfigs);
-          
+
           // Restore active config
           const savedActive = localStorage.getItem(ACTIVE_KEY);
-          if (savedActive && loadedConfigs.some(c => c.id === savedActive)) {
+          if (savedActive && loadedConfigs.some((c) => c.id === savedActive)) {
             setActiveConfig(savedActive);
           } else if (loadedConfigs.length > 0) {
             setActiveConfig(loadedConfigs[0].id);
@@ -42,16 +48,30 @@ export function useConfigStorage(
       }
       isInitialized.current = true;
     };
-    
+
     loadConfigs();
   }, [setConfigs, setActiveConfig]);
 
   // Load active config content when selection changes
   useEffect(() => {
-    if (!activeConfig || !isInitialized.current) return;
-    
+    if (!isInitialized.current) return;
+
+    // If activeConfig didn't change and we have a skip flag, honor it
+    if (activeConfig === prevActiveConfig.current && skipNextReload.current) {
+      skipNextReload.current = false;
+      return;
+    }
+    prevActiveConfig.current = activeConfig;
+    skipNextReload.current = false;
+
+    if (!activeConfig) {
+      setActiveConfigContent(null);
+      setParsedConfig(null);
+      return;
+    }
+
     const loadContent = async () => {
-      const config = configs.find(c => c.id === activeConfig);
+      const config = configs.find((c) => c.id === activeConfig);
       if (!config) {
         setActiveConfigContent(null);
         setParsedConfig(null);
@@ -63,56 +83,84 @@ export function useConfigStorage(
           const { invoke } = await import('@tauri-apps/api/core');
           const content = await invoke<string>('read_config', { filename: config.filename });
           setActiveConfigContent(content);
-          
+
           // Parse config
-          const parsed = await invoke<ParsedConfig>('parse_config', { configContent: content });
-          setParsedConfig(parsed);
+          try {
+            const parsed = await invoke<ParsedConfig>('parse_config', {
+              configContent: content,
+            });
+            setParsedConfig(parsed);
+          } catch (e) {
+            console.error('Failed to parse config:', e);
+            setParsedConfig(null);
+          }
         } catch (e) {
           console.error('Failed to load config content:', e);
+          setActiveConfigContent(null);
+          setParsedConfig(null);
         }
       }
     };
-    
+
     loadContent();
     localStorage.setItem(ACTIVE_KEY, activeConfig);
   }, [activeConfig, configs]);
 
+  // Wrapped setters that set the skip flag
+  const setActiveConfigContentWrapped: Dispatch<SetStateAction<string | null>> = useCallback(
+    (updater) => {
+      skipNextReload.current = true;
+      setActiveConfigContent(updater);
+    },
+    [],
+  );
+
+  const setParsedConfigWrapped: Dispatch<SetStateAction<ParsedConfig | null>> = useCallback(
+    (updater) => {
+      setParsedConfig(updater);
+    },
+    [],
+  );
+
   // Import new config
-  const importConfig = useCallback(async (content: string, filename: string): Promise<Config | null> => {
-    if (!isTauri()) return null;
-    
-    try {
-      const { invoke } = await import('@tauri-apps/api/core');
-      await invoke<string>('import_config', { configContent: content, filename });
-      
-      const newConfig: Config = {
-        id: `config-${Date.now()}`,
-        name: filename.replace(/\.(yaml|yml)$/, ''),
-        filename,
-      };
-      
-      setConfigs(prev => [...prev, newConfig]);
-      setActiveConfig(newConfig.id);
-      
-      return newConfig;
-    } catch (e) {
-      console.error('Failed to import config:', e);
-      return null;
-    }
-  }, [setConfigs, setActiveConfig]);
+  const importConfig = useCallback(
+    async (content: string, filename: string): Promise<Config | null> => {
+      if (!isTauri()) return null;
+
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        await invoke<string>('import_config', { configContent: content, filename });
+
+        const newConfig: Config = {
+          id: `config-${Date.now()}`,
+          name: filename.replace(/\.(yaml|yml)$/, ''),
+          filename,
+        };
+
+        setConfigs((prev) => [...prev, newConfig]);
+        setActiveConfig(newConfig.id);
+
+        return newConfig;
+      } catch (e) {
+        console.error('Failed to import config:', e);
+        return null;
+      }
+    },
+    [setConfigs, setActiveConfig],
+  );
 
   // Delete config
   const deleteActiveConfig = useCallback(async () => {
     if (!activeConfig || !isTauri()) return;
-    
-    const config = configs.find(c => c.id === activeConfig);
+
+    const config = configs.find((c) => c.id === activeConfig);
     if (!config) return;
 
     try {
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('delete_config', { filename: config.filename });
-      
-      const newConfigs = configs.filter(c => c.id !== activeConfig);
+
+      const newConfigs = configs.filter((c) => c.id !== activeConfig);
       setConfigs(newConfigs);
       setActiveConfig(newConfigs[0]?.id || '');
     } catch (e) {
@@ -122,7 +170,9 @@ export function useConfigStorage(
 
   return {
     activeConfigContent,
+    setActiveConfigContent: setActiveConfigContentWrapped,
     parsedConfig,
+    setParsedConfig: setParsedConfigWrapped,
     importConfig,
     deleteActiveConfig,
   };

@@ -19,6 +19,7 @@ const LOG_TAIL_BYTES: u64 = 64 * 1024;
 const MAX_LOG_ENTRIES: usize = 200;
 const LOG_SIZE_CHECK_INTERVAL: u64 = 2000;
 const MIHOMO_READY_TIMEOUT_SECS: u64 = 10;
+const LOG_DIAG_LINES: usize = 10;
 
 // ─── Глобальное состояние ────────────────────────────────────────────────────
 
@@ -431,30 +432,69 @@ fn value_to_u64(v: Option<&serde_json::Value>) -> u64 {
     }
 }
 
+// ─── Диагностика: чтение хвоста лога ─────────────────────────────────────────
+
+fn read_last_log_lines(app: &AppHandle, max_lines: usize) -> String {
+    let log_path = primary_config_dir(app).join("mihomo.log");
+    if !log_path.exists() {
+        return String::new();
+    }
+
+    match fs::read_to_string(&log_path) {
+        Ok(content) => {
+            let lines: Vec<&str> = content
+                .lines()
+                .filter(|l| !l.trim().is_empty())
+                .collect();
+            let start = lines.len().saturating_sub(max_lines);
+            lines[start..].join("\n")
+        }
+        Err(_) => String::new(),
+    }
+}
+
+fn format_error_with_log(base_msg: &str, app: &AppHandle) -> String {
+    let log_tail = read_last_log_lines(app, LOG_DIAG_LINES);
+    if log_tail.is_empty() {
+        base_msg.to_string()
+    } else {
+        format!("{}\n\nMihomo log:\n{}", base_msg, log_tail)
+    }
+}
+
 /// Ожидание готовности mihomo после запуска
-async fn wait_for_mihomo_ready() -> Result<(), String> {
+async fn wait_for_mihomo_ready(app: &AppHandle) -> Result<(), String> {
     let start = std::time::Instant::now();
     let timeout = std::time::Duration::from_secs(MIHOMO_READY_TIMEOUT_SECS);
     let delay = std::time::Duration::from_millis(300);
 
     loop {
-        if start.elapsed() >= timeout {
+        // Проверяем, не умер ли процесс раньше времени
+        {
             if let Ok(mut guard) = MIHOMO_PROCESS.lock() {
                 if let Some(ref mut child) = *guard {
                     if let Ok(Some(status)) = child.try_wait() {
                         let _ = guard.take();
-                        return Err(format!(
-                            "Mihomo exited prematurely with status: {}",
-                            status
-                        ));
+                        // Даём логу записаться
+                        std::thread::sleep(std::time::Duration::from_millis(200));
+                        let msg = format!("Mihomo exited with status: {}", status);
+                        return Err(format_error_with_log(&msg, app));
                     }
                 }
             }
-            return Err("Mihomo did not become ready in time".to_string());
         }
 
+        // Проверяем готовность API
         if mihomo_get_json_value(&["/configs"]).await.is_ok() {
             return Ok(());
+        }
+
+        // Проверяем таймаут
+        if start.elapsed() >= timeout {
+            return Err(format_error_with_log(
+                "Mihomo did not become ready in time",
+                app,
+            ));
         }
 
         std::thread::sleep(delay);
@@ -679,6 +719,56 @@ fn validate_config(content: &str) -> Result<(), String> {
     if let Some(port) = yaml.get("mixed-port").and_then(|v| v.as_u64()) {
         if port == 0 || port > 65535 {
             return Err(format!("Invalid mixed-port: {}", port));
+        }
+    }
+
+    // Проверяем что proxy-groups ссылаются на существующие прокси
+    if has_proxies {
+        let proxy_names: HashSet<String> = yaml
+            .get("proxies")
+            .and_then(|p| p.as_sequence())
+            .map(|seq| {
+                seq.iter()
+                    .filter_map(|p| p.get("name").and_then(|n| n.as_str()))
+                    .map(|s| s.to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let builtins: HashSet<&str> = ["DIRECT", "REJECT", "REJECT-DROP", "PASS", "COMPATIBLE"]
+            .iter()
+            .copied()
+            .collect();
+
+        if let Some(groups) = yaml.get("proxy-groups").and_then(|g| g.as_sequence()) {
+            let group_names: HashSet<String> = groups
+                .iter()
+                .filter_map(|g| g.get("name").and_then(|n| n.as_str()))
+                .map(|s| s.to_string())
+                .collect();
+
+            for group in groups {
+                let group_name = group
+                    .get("name")
+                    .and_then(|n| n.as_str())
+                    .unwrap_or("unknown");
+
+                if let Some(proxies_list) = group.get("proxies").and_then(|p| p.as_sequence()) {
+                    for proxy_ref in proxies_list {
+                        if let Some(name) = proxy_ref.as_str() {
+                            if !proxy_names.contains(name)
+                                && !group_names.contains(name)
+                                && !builtins.contains(name)
+                            {
+                                return Err(format!(
+                                    "proxy-group '{}' references unknown proxy '{}'. Check that proxy names in 'proxies' and 'proxy-groups' match exactly.",
+                                    group_name, name
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -1226,7 +1316,7 @@ pub async fn start_vpn(
 
     update_controller_config(&config_content);
 
-    wait_for_mihomo_ready().await?;
+    wait_for_mihomo_ready(&app).await?;
 
     let parsed = parse_config(config_content)?;
     Ok(VpnStatus {

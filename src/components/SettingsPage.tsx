@@ -27,10 +27,10 @@ interface SettingsPageProps {
   setActiveConfigContent: Dispatch<SetStateAction<string | null>>;
   setParsedConfig: Dispatch<SetStateAction<ParsedConfig | null>>;
   vpnEnabled: boolean;
-  restartVPN: (rulesOverride?: any[]) => Promise<void>;
   settings: Settings;
   setSettings: Dispatch<SetStateAction<Settings>>;
   availableUpdateVersion: string | null;
+  setNeedsRestart: Dispatch<SetStateAction<boolean>>;
 }
 
 type UpdateCheckResult = {
@@ -73,7 +73,7 @@ const autostartPlugin = {
   },
 };
 
-// ─── Парсер протокольных ссылок ──────────────────────────────────────────────
+// ─── Парсеры протокольных ссылок ─────────────────────────────────────────────
 
 function parseVlessLink(text: string): { yaml: string; filename: string } {
   const url = new URL(text);
@@ -138,10 +138,7 @@ function parseVlessLink(text: string): { yaml: string; filename: string } {
 }
 
 function parseHysteria2Link(text: string): { yaml: string; filename: string } {
-  // Убираем протокол
   const stripped = text.replace(/^(hysteria2|hy2):\/\//, '');
-
-  // Отделяем #fragment (имя)
   const hashIdx = stripped.indexOf('#');
   const withoutHash = hashIdx >= 0 ? stripped.slice(0, hashIdx) : stripped;
   const name =
@@ -149,26 +146,22 @@ function parseHysteria2Link(text: string): { yaml: string; filename: string } {
       ? decodeURIComponent(stripped.slice(hashIdx + 1)).trim() || 'Hysteria2'
       : 'Hysteria2';
 
-  // Отделяем ?query
   const qIdx = withoutHash.indexOf('?');
   const beforeQuery = qIdx >= 0 ? withoutHash.slice(0, qIdx) : withoutHash;
   const queryString = qIdx >= 0 ? withoutHash.slice(qIdx + 1) : '';
 
-  // Ищем ПОСЛЕДНИЙ @ — всё до него это пароль, после — host:port
   const lastAtIdx = beforeQuery.lastIndexOf('@');
   if (lastAtIdx === -1) throw new Error('Missing @ in hysteria2:// link');
 
   const password = decodeURIComponent(beforeQuery.slice(0, lastAtIdx));
-  const hostPortRaw = beforeQuery.slice(lastAtIdx + 1).split('/')[0]; // убираем trailing path
+  const hostPortRaw = beforeQuery.slice(lastAtIdx + 1).split('/')[0];
 
   if (!password) throw new Error('Missing password in hysteria2:// link');
 
-  // Парсим host:port
   let server: string;
   let port: number;
 
   if (hostPortRaw.startsWith('[')) {
-    // IPv6: [::1]:8443
     const closeBracket = hostPortRaw.indexOf(']');
     server = hostPortRaw.slice(1, closeBracket);
     port = Number(hostPortRaw.slice(closeBracket + 2)) || 443;
@@ -185,7 +178,6 @@ function parseHysteria2Link(text: string): { yaml: string; filename: string } {
 
   if (!server) throw new Error('Missing server in hysteria2:// link');
 
-  // Парсим query-параметры
   const params = new URLSearchParams(queryString);
   const sni = params.get('sni') || '';
   const insecure = params.get('insecure') === '1';
@@ -250,15 +242,12 @@ function parseShadowsocksLink(text: string): { yaml: string; filename: string } 
 
   const name = decodeURIComponent((url.hash || '').replace(/^#/, '')).trim() || 'Shadowsocks';
 
-  // ss://base64(method:password)@host:port#name
-  // or ss://base64(method:password@host:port)#name
   let method = '';
   let password = '';
   let server = url.hostname;
   let port = url.port ? Number(url.port) : 0;
 
   if (server && port) {
-    // Новый формат: ss://base64@host:port
     const decoded = atob(url.username);
     const colonIdx = decoded.indexOf(':');
     if (colonIdx > 0) {
@@ -266,7 +255,6 @@ function parseShadowsocksLink(text: string): { yaml: string; filename: string } 
       password = decoded.slice(colonIdx + 1);
     }
   } else {
-    // Старый формат: ss://base64(all)
     const path = text.replace(/^ss:\/\//, '').split('#')[0];
     const decoded = atob(path);
     const atIdx = decoded.lastIndexOf('@');
@@ -377,6 +365,124 @@ function parseTrojanLink(text: string): { yaml: string; filename: string } {
   return { yaml, filename };
 }
 
+function parseAmneziaWGLink(text: string): { yaml: string; filename: string } {
+  let base64Data: string;
+  let name = 'AmneziaWG';
+
+  if (text.startsWith('vpn://')) {
+    // Format: vpn://awg#BASE64_JSON
+    const hashIdx = text.indexOf('#');
+    if (hashIdx === -1) throw new Error('Invalid vpn://awg link: missing config data');
+    base64Data = text.slice(hashIdx + 1);
+  } else {
+    // Format: awg://BASE64_JSON#NAME
+    const stripped = text.slice('awg://'.length);
+    const hashIdx = stripped.lastIndexOf('#');
+    if (hashIdx >= 0) {
+      base64Data = stripped.slice(0, hashIdx);
+      const decodedName = decodeURIComponent(stripped.slice(hashIdx + 1)).trim();
+      if (decodedName) name = decodedName;
+    } else {
+      base64Data = stripped;
+    }
+  }
+
+  let config: Record<string, string>;
+  try {
+    const decoded = atob(base64Data.trim());
+    config = JSON.parse(decoded);
+  } catch {
+    throw new Error('Failed to decode AmneziaWG config data');
+  }
+
+  const server = config.hostName || config.hostname || config.server || '';
+  const port = config.port || '51820';
+  const clientIp = (config.client_ip || config.clientIp || '10.0.0.2').split('/')[0];
+  const clientIpv6 = (config.client_ipv6 || config.clientIpv6 || '').split('/')[0];
+  const privateKey = config.client_priv_key || config.clientPrivKey || config.private_key || '';
+  const publicKey = config.server_pub_key || config.serverPubKey || config.public_key || '';
+  const psk = config.psk || config.pre_shared_key || '';
+  const dns1 = config.dns1 || '1.1.1.1';
+  const dns2 = config.dns2 || '';
+  const mtu = config.mtu || '1280';
+
+  // AmneziaWG obfuscation parameters
+  const jc = config.Jc || config.jc || '';
+  const jmin = config.Jmin || config.jmin || '';
+  const jmax = config.Jmax || config.jmax || '';
+  const s1 = config.S1 || config.s1 || '';
+  const s2 = config.S2 || config.s2 || '';
+  const h1 = config.H1 || config.h1 || '';
+  const h2 = config.H2 || config.h2 || '';
+  const h3 = config.H3 || config.h3 || '';
+  const h4 = config.H4 || config.h4 || '';
+
+  if (!server) throw new Error('Missing server/hostName in AmneziaWG config');
+  if (!privateKey) throw new Error('Missing private key in AmneziaWG config');
+  if (!publicKey) throw new Error('Missing server public key in AmneziaWG config');
+
+  const safeName = name.replace(/[\\/:*?"<>|]+/g, '-').slice(0, 60) || 'AmneziaWG';
+  const filename = `${safeName}.yaml`;
+
+  const hasAmneziaOpts = !!(jc || jmin || jmax || s1 || s2 || h1 || h2 || h3 || h4);
+
+  const proxyLines: string[] = [
+    `  - name: "${name}"`,
+    '    type: wireguard',
+    `    server: ${server}`,
+    `    port: ${port}`,
+    `    ip: ${clientIp}`,
+    `    private-key: "${privateKey}"`,
+    `    public-key: "${publicKey}"`,
+  ];
+
+  if (psk) proxyLines.push(`    pre-shared-key: "${psk}"`);
+  if (clientIpv6) proxyLines.push(`    ipv6: ${clientIpv6}`);
+
+  proxyLines.push('    dns:');
+  proxyLines.push(`      - ${dns1}`);
+  if (dns2) proxyLines.push(`      - ${dns2}`);
+
+  proxyLines.push(`    mtu: ${mtu}`);
+  proxyLines.push('    udp: true');
+
+  if (hasAmneziaOpts) {
+    proxyLines.push('    amnezia-wg-option:');
+    if (jc) proxyLines.push(`      jc: ${jc}`);
+    if (jmin) proxyLines.push(`      jmin: ${jmin}`);
+    if (jmax) proxyLines.push(`      jmax: ${jmax}`);
+    if (s1) proxyLines.push(`      s1: ${s1}`);
+    if (s2) proxyLines.push(`      s2: ${s2}`);
+    if (h1) proxyLines.push(`      h1: ${h1}`);
+    if (h2) proxyLines.push(`      h2: ${h2}`);
+    if (h3) proxyLines.push(`      h3: ${h3}`);
+    if (h4) proxyLines.push(`      h4: ${h4}`);
+  }
+
+  const yaml = [
+    'mixed-port: 7890',
+    'allow-lan: false',
+    'mode: rule',
+    'log-level: info',
+    '',
+    'proxies:',
+    ...proxyLines,
+    '',
+    'proxy-groups:',
+    '  - name: PROXY',
+    '    type: select',
+    '    proxies:',
+    `      - "${name}"`,
+    '      - DIRECT',
+    '',
+    'rules:',
+    '  - MATCH,PROXY',
+    '',
+  ].join('\n');
+
+  return { yaml, filename };
+}
+
 function parseProxyLink(text: string): { yaml: string; filename: string } {
   const trimmed = text.trim();
 
@@ -385,9 +491,11 @@ function parseProxyLink(text: string): { yaml: string; filename: string } {
     return parseHysteria2Link(trimmed);
   if (trimmed.startsWith('ss://')) return parseShadowsocksLink(trimmed);
   if (trimmed.startsWith('trojan://')) return parseTrojanLink(trimmed);
+  if (trimmed.startsWith('awg://') || trimmed.startsWith('vpn://awg'))
+    return parseAmneziaWGLink(trimmed);
 
   throw new Error(
-    'Unsupported link format. Supported: vless://, hysteria2://, hy2://, ss://, trojan://',
+    'Unsupported link format. Supported: vless://, hysteria2://, hy2://, ss://, trojan://, awg://, vpn://awg',
   );
 }
 
@@ -402,10 +510,10 @@ function SettingsPage({
   setActiveConfigContent,
   setParsedConfig,
   vpnEnabled,
-  restartVPN,
   settings,
   setSettings,
   availableUpdateVersion,
+  setNeedsRestart,
 }: SettingsPageProps) {
   const { t, language, setLanguage } = useI18n();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -413,6 +521,7 @@ function SettingsPage({
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [mtuError, setMtuError] = useState(false);
+  const [mtuDraft, setMtuDraft] = useState(settings.mtu);
   const [updateCheck, setUpdateCheck] = useState<UpdateCheckResult | null>(null);
   const [updateStatusText, setUpdateStatusText] = useState<string | null>(null);
   const [isCheckingUpdates, setIsCheckingUpdates] = useState(false);
@@ -431,6 +540,11 @@ function SettingsPage({
   const [versionKickColor, setVersionKickColor] = useState<string | null>(null);
   const [showEasterEggModal, setShowEasterEggModal] = useState(false);
   const [easterEggImageUrl, setEasterEggImageUrl] = useState<string | null>(null);
+
+  // Sync mtuDraft when settings.mtu changes externally
+  useEffect(() => {
+    setMtuDraft(settings.mtu);
+  }, [settings.mtu]);
 
   useEffect(() => {
     let cancelled = false;
@@ -473,6 +587,15 @@ function SettingsPage({
     };
   }, []);
 
+  // Signal restart needed when active config changes while VPN is running
+  const prevActiveConfigRef = useRef(activeConfigId);
+  useEffect(() => {
+    if (prevActiveConfigRef.current !== activeConfigId && vpnEnabled) {
+      setNeedsRestart(true);
+    }
+    prevActiveConfigRef.current = activeConfigId;
+  }, [activeConfigId, vpnEnabled, setNeedsRestart]);
+
   const toggleSetting = useCallback(
     async (key: keyof Settings) => {
       try {
@@ -494,21 +617,17 @@ function SettingsPage({
           }
         }
 
+        // These settings require VPN restart — signal via sidebar button
         const settingsRequiringRestart: (keyof Settings)[] = ['enableTun', 'killSwitch'];
         if (vpnEnabled && settingsRequiringRestart.includes(key)) {
-          try {
-            await restartVPN();
-          } catch (e) {
-            console.error('Failed to restart VPN:', e);
-            setSettings((prev) => ({ ...prev, [key]: !nextValue }));
-          }
+          setNeedsRestart(true);
         }
       } catch (e) {
         console.error('Error toggling setting:', e);
         setSettings((prev) => ({ ...prev, [key]: prev[key] }));
       }
     },
-    [setSettings, vpnEnabled, restartVPN],
+    [setSettings, vpnEnabled, setNeedsRestart],
   );
 
   const handleCheckUpdates = useCallback(async () => {
@@ -555,21 +674,41 @@ function SettingsPage({
     }
   }, [t.settings, updateCheck?.update_available]);
 
-  const handleMtuChange = useCallback(
-    async (value: string) => {
-      const numValue = parseInt(value, 10);
-      if (value && (numValue < MTU_MIN || numValue > MTU_MAX)) {
-        setMtuError(true);
-        setTimeout(() => setMtuError(false), 400);
-        return;
-      }
-      setSettings((prev) => ({ ...prev, mtu: value }));
-      if (vpnEnabled && value) {
-        await new Promise((resolve) => setTimeout(resolve, 100));
-        await restartVPN();
+  // MTU: free typing in draft, validate only on blur/enter
+  const handleMtuDraftChange = useCallback((value: string) => {
+    setMtuDraft(value.replace(/\D/g, ''));
+  }, []);
+
+  const handleMtuBlur = useCallback(() => {
+    const raw = mtuDraft.trim();
+    if (!raw) {
+      setMtuDraft(MTU_DEFAULT);
+      setSettings((prev) => ({ ...prev, mtu: MTU_DEFAULT }));
+      if (vpnEnabled) setNeedsRestart(true);
+      return;
+    }
+    const numValue = parseInt(raw, 10);
+    if (isNaN(numValue) || numValue < MTU_MIN || numValue > MTU_MAX) {
+      setMtuError(true);
+      setTimeout(() => setMtuError(false), 400);
+      setMtuDraft(settings.mtu);
+      return;
+    }
+    const strValue = String(numValue);
+    if (strValue !== settings.mtu) {
+      setSettings((prev) => ({ ...prev, mtu: strValue }));
+      setMtuDraft(strValue);
+      if (vpnEnabled) setNeedsRestart(true);
+    }
+  }, [mtuDraft, settings.mtu, setSettings, vpnEnabled, setNeedsRestart]);
+
+  const handleMtuKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === 'Enter') {
+        e.currentTarget.blur();
       }
     },
-    [setSettings, vpnEnabled, restartVPN],
+    [],
   );
 
   const handleImportConfig = useCallback(
@@ -597,8 +736,6 @@ function SettingsPage({
     },
     [setConfigs, setActiveConfigId],
   );
-
-  // ─── Универсальный импорт ссылок ────────────────────────────────────────────
 
   const importProxyFromText = useCallback(
     async (raw: string) => {
@@ -716,40 +853,33 @@ function SettingsPage({
     try {
       const { invoke } = await import('@tauri-apps/api/core');
 
-      // Валидация YAML
+      // Validate YAML
+      let parsed: ParsedConfig;
       try {
-        await invoke('parse_config', { configContent: configEditorContent });
+        parsed = await invoke<ParsedConfig>('parse_config', {
+          configContent: configEditorContent,
+        });
       } catch (e) {
         setConfigEditorError(`Invalid config: ${e}`);
         setIsSavingConfig(false);
         return;
       }
 
+      // Save to file
       await invoke('import_config', {
         configContent: configEditorContent,
         filename: config.filename,
       });
 
-      // Обновляем контент в родительском компоненте
+      // Update parent state so useConfigStorage won't reload stale content
       setActiveConfigContent(configEditorContent);
-      try {
-        const parsed = await invoke<ParsedConfig>('parse_config', {
-          configContent: configEditorContent,
-        });
-        setParsedConfig(parsed);
-      } catch {
-        // не критично
-      }
+      setParsedConfig(parsed);
 
       setShowConfigEditor(false);
 
-      // Перезапускаем VPN если он запущен
+      // Signal restart needed — user clicks sidebar button
       if (vpnEnabled) {
-        try {
-          await restartVPN();
-        } catch (e) {
-          console.error('Failed to restart VPN after config edit:', e);
-        }
+        setNeedsRestart(true);
       }
     } catch (e) {
       setConfigEditorError(`Failed to save: ${e}`);
@@ -761,9 +891,9 @@ function SettingsPage({
     configs,
     configEditorContent,
     vpnEnabled,
-    restartVPN,
     setActiveConfigContent,
     setParsedConfig,
+    setNeedsRestart,
   ]);
 
   const handleLanguageChange = useCallback(
@@ -1067,15 +1197,15 @@ function SettingsPage({
                 </button>
               </span>
               <input
-                type="number"
-                min={MTU_MIN}
-                max={MTU_MAX}
-                value={settings.mtu}
-                onChange={(e) => handleMtuChange(e.target.value.replace(/\D/g, ''))}
-                onBlur={() => {
-                  if (!settings.mtu) setSettings((prev) => ({ ...prev, mtu: MTU_DEFAULT }));
-                }}
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={mtuDraft}
+                onChange={(e) => handleMtuDraftChange(e.target.value)}
+                onBlur={handleMtuBlur}
+                onKeyDown={handleMtuKeyDown}
                 className={`input ${mtuError ? 'input-error input-shake' : ''}`}
+                placeholder={`${MTU_MIN}–${MTU_MAX}`}
               />
             </div>
           </div>

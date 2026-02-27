@@ -550,9 +550,10 @@ export default function App() {
             setShowLogsModal={setShowLogsModal} configs={configs} setConfigs={setConfigs}
             activeConfigId={activeConfigId} setActiveConfigId={wrappedSetActiveConfigId}
             setActiveConfigContent={setActiveConfigContent} setParsedConfig={setParsedConfig}
-            vpnEnabled={vpnEnabled} restartVPN={restartVPN}
+            vpnEnabled={vpnEnabled}
             settings={settings} setSettings={setSettings}
             availableUpdateVersion={availableUpdateVersion}
+            setNeedsRestart={setRestartRequiredForConfig}
           />
         );
       default:

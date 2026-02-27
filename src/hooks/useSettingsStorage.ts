@@ -4,7 +4,6 @@ import type { Settings } from '../types';
 const STORAGE_KEY = 'vpn-settings';
 const SETTINGS_EVENT = 'vpn-settings-updated';
 
-// Default settings to ensure all required fields are present
 const DEFAULT_SETTINGS: Settings = {
   autostart: false,
   startminimized: false,
@@ -16,10 +15,9 @@ const DEFAULT_SETTINGS: Settings = {
   logLevel: 'info',
   mtu: '1500',
   enableTun: true,
-  snowfall: false
+  snowfall: false,
 };
 
-// Helper function to load settings from localStorage
 const loadSettings = (): Settings => {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -33,21 +31,16 @@ const loadSettings = (): Settings => {
   return { ...DEFAULT_SETTINGS };
 };
 
-export function useSettingsStorage(): [Settings, (updater: Settings | ((prev: Settings) => Settings)) => void] {
-  const [settings, setSettingsState] = useState<Settings>(loadSettings());
-  const instanceIdRef = useRef<string>(Math.random().toString(36).slice(2));
-
-  // Load settings from localStorage on mount
-  useEffect(() => {
-    const savedSettings = loadSettings();
-    setSettingsState(savedSettings);
-  }, []);
+export function useSettingsStorage(): [
+  Settings,
+  (updater: Settings | ((prev: Settings) => Settings)) => void,
+] {
+  const [settings, setSettingsState] = useState<Settings>(loadSettings);
+  const instanceIdRef = useRef(Math.random().toString(36).slice(2));
 
   useEffect(() => {
     const handleStorage = (e: StorageEvent) => {
-      if (e.key !== STORAGE_KEY) return;
-      if (!e.newValue) return;
-
+      if (e.key !== STORAGE_KEY || !e.newValue) return;
       try {
         const parsed = JSON.parse(e.newValue);
         setSettingsState({ ...DEFAULT_SETTINGS, ...parsed });
@@ -72,33 +65,29 @@ export function useSettingsStorage(): [Settings, (updater: Settings | ((prev: Se
     };
   }, []);
 
-  // Save settings to localStorage and update state
-  const saveSettings = useCallback((newSettings: Settings) => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(newSettings));
-      return true;
-    } catch (e) {
-      console.error('Failed to save settings:', e);
-      return false;
-    }
-  }, []);
+  const setSettings = useCallback(
+    (updater: Settings | ((prev: Settings) => Settings)) => {
+      setSettingsState((prev) => {
+        const nextRaw = typeof updater === 'function' ? updater(prev) : updater;
+        const next = { ...DEFAULT_SETTINGS, ...nextRaw };
 
-  // Wrapper for setSettings to handle both direct and functional updates
-  const setSettings = useCallback((updater: Settings | ((prev: Settings) => Settings)) => {
-    setSettingsState(prev => {
-      const nextSettingsRaw = typeof updater === 'function' ? updater(prev) : updater;
-      const nextSettings = { ...DEFAULT_SETTINGS, ...nextSettingsRaw };
-      saveSettings(nextSettings);
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+        } catch (e) {
+          console.error('Failed to save settings:', e);
+        }
 
-      window.dispatchEvent(
-        new CustomEvent(SETTINGS_EVENT, {
-          detail: { settings: nextSettings, source: instanceIdRef.current },
-        })
-      );
+        window.dispatchEvent(
+          new CustomEvent(SETTINGS_EVENT, {
+            detail: { settings: next, source: instanceIdRef.current },
+          }),
+        );
 
-      return nextSettings;
-    });
-  }, [saveSettings]);
+        return next;
+      });
+    },
+    [],
+  );
 
   return [settings, setSettings];
 }

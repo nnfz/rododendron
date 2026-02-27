@@ -1,5 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
-
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { isTauri } from '../utils/isTauri';
 
 interface TrafficStats {
@@ -7,8 +6,36 @@ interface TrafficStats {
   down: number;
 }
 
-export function useVPNStats(vpnEnabled: boolean, pollingEnabled: boolean = true) {
+const VPN_START_TIME_KEY = 'vpn-start-time';
 
+function loadStartTime(): number | null {
+  try {
+    const raw = localStorage.getItem(VPN_START_TIME_KEY);
+    if (!raw) return null;
+    const ts = Number(raw);
+    return Number.isFinite(ts) && ts > 0 ? ts : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveStartTime(ts: number) {
+  try {
+    localStorage.setItem(VPN_START_TIME_KEY, String(ts));
+  } catch {
+    // ignore
+  }
+}
+
+function clearStartTime() {
+  try {
+    localStorage.removeItem(VPN_START_TIME_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+export function useVPNStats(vpnEnabled: boolean, pollingEnabled: boolean = true) {
   const [uptime, setUptime] = useState({ hours: 0, minutes: 0, seconds: 0 });
   const [traffic, setTraffic] = useState<TrafficStats>({ up: 0, down: 0 });
   const [latency, setLatency] = useState<number | null>(null);
@@ -22,8 +49,14 @@ export function useVPNStats(vpnEnabled: boolean, pollingEnabled: boolean = true)
   const lastTrafficSampleRef = useRef<{ ts: number; up: number; down: number } | null>(null);
   const lastConnTotalsRef = useRef<{ ts: number; upTotal: number; downTotal: number } | null>(null);
 
+  // Track previous vpnEnabled to distinguish initial false from real disconnect
+  const prevVpnEnabledRef = useRef<boolean | null>(null);
+
   // Uptime tracker
   useEffect(() => {
+    const wasEnabled = prevVpnEnabledRef.current;
+    prevVpnEnabledRef.current = vpnEnabled;
+
     if (!vpnEnabled) {
       setUptime({ hours: 0, minutes: 0, seconds: 0 });
       setTraffic({ up: 0, down: 0 });
@@ -33,6 +66,13 @@ export function useVPNStats(vpnEnabled: boolean, pollingEnabled: boolean = true)
       lastTrafficSampleRef.current = null;
       lastConnTotalsRef.current = null;
       stopRef.current = false;
+
+      // Only clear saved timestamp on real disconnect (true → false)
+      // Don't clear on initial load (null → false)
+      if (wasEnabled === true) {
+        clearStartTime();
+      }
+
       if (uptimeIntervalRef.current) {
         clearInterval(uptimeIntervalRef.current);
         uptimeIntervalRef.current = null;
@@ -48,8 +88,16 @@ export function useVPNStats(vpnEnabled: boolean, pollingEnabled: boolean = true)
       return;
     }
 
+    // Restore saved start time or create new one
     if (!startTimeRef.current) {
-      startTimeRef.current = Date.now();
+      const saved = loadStartTime();
+      if (saved && saved <= Date.now()) {
+        startTimeRef.current = saved;
+      } else {
+        const now = Date.now();
+        startTimeRef.current = now;
+        saveStartTime(now);
+      }
     }
 
     uptimeIntervalRef.current = setInterval(() => {
@@ -99,10 +147,6 @@ export function useVPNStats(vpnEnabled: boolean, pollingEnabled: boolean = true)
       const conns = await invokeTauri<any>('mihomo_get_connections');
       const root = conns;
 
-      // Some variants:
-      // - { uploadTotal, downloadTotal, connections: [...] }
-      // - { connections: { uploadTotal, downloadTotal, ... } }
-      // - { connections: [...] } (no totals) => sum per-connection
       const nestedTotals =
         root?.connections && typeof root.connections === 'object' && !Array.isArray(root.connections)
           ? root.connections
@@ -138,16 +182,14 @@ export function useVPNStats(vpnEnabled: boolean, pollingEnabled: boolean = true)
         if (stopRef.current) return;
         const now = Date.now();
 
-        // First try to get traffic from /connections endpoint
         try {
           await computeSpeedFromConnectionsTotals(now);
           trafficFailCountRef.current = 0;
-          return; // If successful, we're done
+          return;
         } catch (e) {
           console.debug('Fallback to /traffic endpoint:', e);
         }
 
-        // Fallback to /traffic endpoint if /connections fails
         try {
           const data = await invokeTauri<{ up: number; down: number }>('mihomo_get_traffic');
           const upRaw = data?.up ?? 0;
@@ -170,13 +212,9 @@ export function useVPNStats(vpnEnabled: boolean, pollingEnabled: boolean = true)
             }
           }
         } catch (e) {
-          // Let the outer catch handle logging/throttling
           throw e;
         }
-
-        // If we get here, both /connections and /traffic endpoints failed
       } catch (e) {
-        // Log first few errors, then only occasionally
         trafficFailCountRef.current += 1;
         if (trafficFailCountRef.current <= 3) {
           console.warn('Failed to get traffic data (attempt', trafficFailCountRef.current, '):', e);
@@ -238,13 +276,11 @@ export function useVPNStats(vpnEnabled: boolean, pollingEnabled: boolean = true)
       }
     };
 
-    // Первый запрос с небольшой задержкой для инициализации mihomo
     const initialTimeout = setTimeout(() => {
       fetchStats();
       fetchDelay();
     }, 2000);
 
-    // Регулярные обновления
     const trafficInterval = setInterval(fetchStats, 1000);
     const delayInterval = setInterval(fetchDelay, 5000);
 
@@ -260,12 +296,12 @@ export function useVPNStats(vpnEnabled: boolean, pollingEnabled: boolean = true)
     };
   }, [vpnEnabled, pollingEnabled]);
 
-  const formatUptime = () => {
+  const formatUptime = useCallback(() => {
     const pad = (n: number) => String(n).padStart(2, '0');
     return `${pad(uptime.hours)}:${pad(uptime.minutes)}:${pad(uptime.seconds)}`;
-  };
+  }, [uptime.hours, uptime.minutes, uptime.seconds]);
 
-  const formatTraffic = (bytesPerSec: number) => {
+  const formatTraffic = useCallback((bytesPerSec: number) => {
     if (!Number.isFinite(bytesPerSec) || bytesPerSec <= 0) return '0 B/s';
 
     const kb = bytesPerSec / 1024;
@@ -276,7 +312,7 @@ export function useVPNStats(vpnEnabled: boolean, pollingEnabled: boolean = true)
 
     const gbps = mbps / 1024;
     return `${gbps.toFixed(2)} GB/s`;
-  };
+  }, []);
 
   return {
     uptime,
