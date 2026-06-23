@@ -938,7 +938,7 @@ function SettingsPage({
     [],
   );
 
-  const handleImportConfig = useCallback(
+const handleImportConfig = useCallback(
     async (event: React.ChangeEvent<HTMLInputElement>) => {
       const file = event.target.files?.[0];
       if (!file) return;
@@ -957,9 +957,6 @@ function SettingsPage({
           if (lowerName.endsWith('.conf')) {
             // === Используем Rust-бэкенд (рекомендуется) ===
             // Он автоматически добавит persistent-keepalive: 25
-            const yamlFromRust = await invoke<string>('convert_amnezia_wg_conf', {
-              configContent: content,
-            });
 
             // Оборачиваем в полноценный минимальный конфиг
             const fullConfig = await invoke<string>('import_amnezia_wg_as_config', {
