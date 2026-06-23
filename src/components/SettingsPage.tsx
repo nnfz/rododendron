@@ -91,17 +91,16 @@ function parseVlessLink(text: string): { yaml: string; filename: string } {
   const sid = url.searchParams.get('sid') || '';
   const flow = url.searchParams.get('flow') || '';
   const tlsEnabled = security === 'reality' || security === 'tls';
+  
+  const host = url.searchParams.get('host') || '';
+  const path = url.searchParams.get('path') || '';
+  const mode = url.searchParams.get('mode') || '';
+  const serviceName = url.searchParams.get('serviceName') || '';
 
   const safeName = name.replace(/[\\/:*?"<>|]+/g, '-').slice(0, 60) || 'VLESS';
   const filename = `${safeName}.yaml`;
 
-  const yaml = [
-    'mixed-port: 7890',
-    'allow-lan: false',
-    'mode: rule',
-    'log-level: info',
-    '',
-    'proxies:',
+  const proxyLines: string[] = [
     `  - name: "${name}"`,
     '    type: vless',
     `    server: ${server}`,
@@ -111,16 +110,46 @@ function parseVlessLink(text: string): { yaml: string; filename: string } {
     '    packet-encoding: xudp',
     `    network: ${network}`,
     `    tls: ${tlsEnabled}`,
-    ...(sni ? [`    servername: ${sni}`] : []),
-    ...(fp ? [`    client-fingerprint: ${fp}`] : []),
-    ...(flow ? [`    flow: ${flow}`] : []),
-    ...(security === 'reality'
-      ? [
-          '    reality-opts:',
-          ...(pbk ? [`      public-key: ${pbk}`] : []),
-          ...(sid ? [`      short-id: ${sid}`] : []),
-        ]
-      : []),
+  ];
+
+  if (sni) proxyLines.push(`    servername: ${sni}`);
+  if (fp) proxyLines.push(`    client-fingerprint: ${fp}`);
+  if (flow) proxyLines.push(`    flow: ${flow}`);
+
+  if (security === 'reality') {
+    proxyLines.push('    reality-opts:');
+    if (pbk) proxyLines.push(`      public-key: ${pbk}`);
+    if (sid) proxyLines.push(`      short-id: ${sid}`);
+  }
+
+  if (network === 'xhttp') {
+    proxyLines.push('    xhttp-opts:');
+    if (mode) proxyLines.push(`      mode: ${mode}`);
+    if (host || path) {
+      proxyLines.push('      extra:');
+      if (host) proxyLines.push(`        host: "${host}"`);
+      if (path) proxyLines.push(`        path: "${path}"`);
+    }
+  } else if (network === 'ws') {
+    proxyLines.push('    ws-opts:');
+    if (path) proxyLines.push(`      path: "${path}"`);
+    if (host) {
+      proxyLines.push('      headers:');
+      proxyLines.push(`        Host: "${host}"`);
+    }
+  } else if (network === 'grpc') {
+    proxyLines.push('    grpc-opts:');
+    if (serviceName) proxyLines.push(`      grpc-service-name: "${serviceName}"`);
+  }
+
+  const yaml = [
+    'mixed-port: 7890',
+    'allow-lan: false',
+    'mode: rule',
+    'log-level: info',
+    '',
+    'proxies:',
+    ...proxyLines,
     '',
     'proxy-groups:',
     '  - name: PROXY',
@@ -318,6 +347,12 @@ function parseTrojanLink(text: string): { yaml: string; filename: string } {
   const sni = url.searchParams.get('sni') || '';
   const alpn = url.searchParams.get('alpn') || '';
   const insecure = url.searchParams.get('allowInsecure') === '1';
+  
+  const network = (url.searchParams.get('type') || 'tcp').toLowerCase();
+  const host = url.searchParams.get('host') || '';
+  const path = url.searchParams.get('path') || '';
+  const mode = url.searchParams.get('mode') || '';
+  const serviceName = url.searchParams.get('serviceName') || '';
 
   if (!password || !server) throw new Error('Missing password or server in trojan:// link');
 
@@ -333,12 +368,36 @@ function parseTrojanLink(text: string): { yaml: string; filename: string } {
     '    udp: true',
   ];
 
+  if (network !== 'tcp') {
+    proxyLines.push(`    network: ${network}`);
+  }
+
   if (sni) proxyLines.push(`    sni: ${sni}`);
   if (insecure) proxyLines.push('    skip-cert-verify: true');
   if (alpn) {
     const alpnList = alpn.split(',').map((a) => a.trim()).filter(Boolean);
     proxyLines.push('    alpn:');
     alpnList.forEach((a) => proxyLines.push(`      - ${a}`));
+  }
+
+  if (network === 'xhttp') {
+    proxyLines.push('    xhttp-opts:');
+    if (mode) proxyLines.push(`      mode: ${mode}`);
+    if (host || path) {
+      proxyLines.push('      extra:');
+      if (host) proxyLines.push(`        host: "${host}"`);
+      if (path) proxyLines.push(`        path: "${path}"`);
+    }
+  } else if (network === 'ws') {
+    proxyLines.push('    ws-opts:');
+    if (path) proxyLines.push(`      path: "${path}"`);
+    if (host) {
+      proxyLines.push('      headers:');
+      proxyLines.push(`        Host: "${host}"`);
+    }
+  } else if (network === 'grpc') {
+    proxyLines.push('    grpc-opts:');
+    if (serviceName) proxyLines.push(`      grpc-service-name: "${serviceName}"`);
   }
 
   const yaml = [
@@ -483,6 +542,170 @@ function parseAmneziaWGLink(text: string): { yaml: string; filename: string } {
   return { yaml, filename };
 }
 
+function parseWGConfFile(content: string, originalFilename?: string): { yaml: string; filename: string } {
+  const lines = content.split(/\r?\n/);
+  const sections: Record<string, Record<string, string>> = {};
+  let currentSection = '';
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#') || line.startsWith(';')) continue;
+
+    const sectionMatch = line.match(/^\[(\w+)\]$/);
+    if (sectionMatch) {
+      currentSection = sectionMatch[1];
+      if (!sections[currentSection]) sections[currentSection] = {};
+      continue;
+    }
+
+    const kvMatch = line.match(/^(\S+)\s*=\s*(.*)$/);
+    if (kvMatch && currentSection) {
+      const key = kvMatch[1].trim();
+      const value = kvMatch[2].trim();
+      // For AllowedIPs, append multiple values
+      if (key === 'AllowedIPs' && sections[currentSection][key]) {
+        sections[currentSection][key] += ',' + value;
+      } else {
+        sections[currentSection][key] = value;
+      }
+    }
+  }
+
+  const iface = sections['Interface'] || {};
+  const peer = sections['Peer'] || {};
+
+  const privateKey = iface['PrivateKey'] || '';
+  const addressRaw = iface['Address'] || '';
+  const dns = iface['DNS'] || '';
+  const mtu = iface['MTU'] || '1280';
+
+  const publicKey = peer['PublicKey'] || '';
+  const psk = peer['PresharedKey'] || '';
+  const endpoint = peer['Endpoint'] || '';
+
+  if (!privateKey) throw new Error('Missing PrivateKey in [Interface]');
+  if (!publicKey) throw new Error('Missing PublicKey in [Peer]');
+  if (!endpoint) throw new Error('Missing Endpoint in [Peer]');
+
+  // Parse endpoint -> server:port
+  let server: string;
+  let port: string;
+  if (endpoint.startsWith('[')) {
+    // IPv6: [::1]:51820
+    const closeBracket = endpoint.indexOf(']');
+    server = endpoint.slice(1, closeBracket);
+    port = endpoint.slice(closeBracket + 2) || '51820';
+  } else {
+    const colonIdx = endpoint.lastIndexOf(':');
+    if (colonIdx > 0) {
+      server = endpoint.slice(0, colonIdx);
+      port = endpoint.slice(colonIdx + 1) || '51820';
+    } else {
+      server = endpoint;
+      port = '51820';
+    }
+  }
+
+  // Parse addresses (can be comma-separated)
+  const addresses = addressRaw.split(',').map((a) => a.trim()).filter(Boolean);
+  let clientIp = '';
+  let clientIpv6 = '';
+  for (const addr of addresses) {
+    const ip = addr.split('/')[0];
+    if (addr.includes(':')) {
+      if (!clientIpv6) clientIpv6 = ip;
+    } else {
+      if (!clientIp) clientIp = ip;
+    }
+  }
+  if (!clientIp) clientIp = '10.0.0.2';
+
+  // Parse DNS
+  const dnsServers = dns.split(',').map((d) => d.trim()).filter(Boolean);
+  const dns1 = dnsServers[0] || '1.1.1.1';
+  const dns2 = dnsServers[1] || '';
+
+  // AmneziaWG obfuscation parameters (from [Interface])
+  const jc = iface['Jc'] || '';
+  const jmin = iface['Jmin'] || '';
+  const jmax = iface['Jmax'] || '';
+  const s1 = iface['S1'] || '';
+  const s2 = iface['S2'] || '';
+  const h1 = iface['H1'] || '';
+  const h2 = iface['H2'] || '';
+  const h3 = iface['H3'] || '';
+  const h4 = iface['H4'] || '';
+
+  const hasAmneziaOpts = !!(jc || jmin || jmax || s1 || s2 || h1 || h2 || h3 || h4);
+  const baseName = hasAmneziaOpts ? 'AmneziaWG' : 'WireGuard';
+
+  // Derive name from filename or use protocol name
+  let name = baseName;
+  if (originalFilename) {
+    const stripped = originalFilename.replace(/\.conf$/i, '').trim();
+    if (stripped) name = stripped;
+  }
+
+  const safeName = name.replace(/[\\/:*?"<>|]+/g, '-').slice(0, 60) || baseName;
+  const filename = `${safeName}.yaml`;
+
+  const proxyLines: string[] = [
+    `  - name: "${name}"`,
+    '    type: wireguard',
+    `    server: ${server}`,
+    `    port: ${port}`,
+    `    ip: ${clientIp}`,
+    `    private-key: "${privateKey}"`,
+    `    public-key: "${publicKey}"`,
+  ];
+
+  if (psk) proxyLines.push(`    pre-shared-key: "${psk}"`);
+  if (clientIpv6) proxyLines.push(`    ipv6: ${clientIpv6}`);
+
+  proxyLines.push('    dns:');
+  proxyLines.push(`      - ${dns1}`);
+  if (dns2) proxyLines.push(`      - ${dns2}`);
+
+  proxyLines.push(`    mtu: ${mtu}`);
+  proxyLines.push('    udp: true');
+
+  if (hasAmneziaOpts) {
+    proxyLines.push('    amnezia-wg-option:');
+    if (jc) proxyLines.push(`      jc: ${jc}`);
+    if (jmin) proxyLines.push(`      jmin: ${jmin}`);
+    if (jmax) proxyLines.push(`      jmax: ${jmax}`);
+    if (s1) proxyLines.push(`      s1: ${s1}`);
+    if (s2) proxyLines.push(`      s2: ${s2}`);
+    if (h1) proxyLines.push(`      h1: ${h1}`);
+    if (h2) proxyLines.push(`      h2: ${h2}`);
+    if (h3) proxyLines.push(`      h3: ${h3}`);
+    if (h4) proxyLines.push(`      h4: ${h4}`);
+  }
+
+  const yaml = [
+    'mixed-port: 7890',
+    'allow-lan: false',
+    'mode: rule',
+    'log-level: info',
+    '',
+    'proxies:',
+    ...proxyLines,
+    '',
+    'proxy-groups:',
+    '  - name: PROXY',
+    '    type: select',
+    '    proxies:',
+    `      - "${name}"`,
+    '      - DIRECT',
+    '',
+    'rules:',
+    '  - MATCH,PROXY',
+    '',
+  ].join('\n');
+
+  return { yaml, filename };
+}
+
 function parseProxyLink(text: string): { yaml: string; filename: string } {
   const trimmed = text.trim();
 
@@ -494,8 +717,12 @@ function parseProxyLink(text: string): { yaml: string; filename: string } {
   if (trimmed.startsWith('awg://') || trimmed.startsWith('vpn://awg'))
     return parseAmneziaWGLink(trimmed);
 
+  // Detect WireGuard/AmneziaWG .conf content (INI-style with [Interface] and [Peer])
+  if (trimmed.includes('[Interface]') && trimmed.includes('[Peer]'))
+    return parseWGConfFile(trimmed);
+
   throw new Error(
-    'Unsupported link format. Supported: vless://, hysteria2://, hy2://, ss://, trojan://, awg://, vpn://awg',
+    'Unsupported link format. Supported: vless://, hysteria2://, hy2://, ss://, trojan://, awg://, vpn://awg, WireGuard/AmneziaWG .conf',
   );
 }
 
@@ -715,23 +942,57 @@ function SettingsPage({
     async (event: React.ChangeEvent<HTMLInputElement>) => {
       const file = event.target.files?.[0];
       if (!file) return;
+
       const content = await file.text();
-      const filename = file.name;
+      const originalFilename = file.name;
+      const lowerName = originalFilename.toLowerCase();
+
       if (isTauri()) {
         try {
           const { invoke } = await import('@tauri-apps/api/core');
-          await invoke('import_config', { configContent: content, filename });
+
+          let importContent: string;
+          let importFilename: string;
+
+          if (lowerName.endsWith('.conf')) {
+            // === Используем Rust-бэкенд (рекомендуется) ===
+            // Он автоматически добавит persistent-keepalive: 25
+            const yamlFromRust = await invoke<string>('convert_amnezia_wg_conf', {
+              configContent: content,
+            });
+
+            // Оборачиваем в полноценный минимальный конфиг
+            const fullConfig = await invoke<string>('import_amnezia_wg_as_config', {
+              configContent: content,
+              proxyName: originalFilename.replace(/\.conf$/i, ''),
+            });
+
+            importContent = fullConfig;
+            importFilename = originalFilename.replace(/\.conf$/i, '.yaml');
+          } else {
+            importContent = content;
+            importFilename = originalFilename;
+          }
+
+          await invoke('import_config', {
+            configContent: importContent,
+            filename: importFilename,
+          });
+
           const newConfig: Config = {
-            id: `config-${Date.now()}-${filename}`,
-            name: filename.replace(/\.(yaml|yml)$/, ''),
-            filename,
+            id: `config-${Date.now()}-${importFilename}`,
+            name: importFilename.replace(/\.(yaml|yml)$/, ''),
+            filename: importFilename,
           };
+
           setConfigs((prev) => [...prev, newConfig]);
           setActiveConfigId(newConfig.id);
         } catch (e) {
           console.error('Failed to import config:', e);
+          setVlessImportError(e instanceof Error ? e.message : String(e));
         }
       }
+
       if (fileInputRef.current) fileInputRef.current.value = '';
     },
     [setConfigs, setActiveConfigId],
@@ -1022,7 +1283,7 @@ function SettingsPage({
             <input
               ref={fileInputRef}
               type="file"
-              accept=".yaml,.yml"
+              accept=".yaml,.yml,.conf"
               onChange={handleImportConfig}
               style={{ display: 'none' }}
             />

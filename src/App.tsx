@@ -206,6 +206,8 @@ export default function App() {
       setActiveConfigContent(null);
       setParsedConfig(null);
       setParsedConfigFilename(null);
+      setHomeDisplaySnapshot(null);
+      setConnectedConfigSnapshot(null);
       setActiveConfigId(nextId);
     },
     [activeConfigId]

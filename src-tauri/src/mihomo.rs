@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
@@ -801,6 +802,303 @@ pub fn cleanup_mihomo() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// ─── AmneziaWG / WireGuard .conf support ─────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Парсит AmneziaWG / WireGuard .conf файл и возвращает YAML для proxy entry в Mihomo формате.
+/// Добавляет persistent-keepalive: 25 по умолчанию (решает проблему обрыва соединения).
+#[allow(dead_code)]
+fn parse_amnezia_wg_conf(content: &str) -> Result<serde_yaml::Value, String> {
+    let mut interface: HashMap<String, String> = HashMap::new();
+    let mut peer: HashMap<String, String> = HashMap::new();
+    let mut current_section = String::new();
+
+    for raw_line in content.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            current_section = line[1..line.len() - 1].to_lowercase();
+            continue;
+        }
+        if let Some((key, value)) = line.split_once('=') {
+            let key = key.trim().to_lowercase();
+            let value = value.trim().to_string();
+            if current_section == "interface" {
+                interface.insert(key, value);
+            } else if current_section == "peer" {
+                peer.insert(key, value);
+            }
+        }
+    }
+
+    let mut proxy = serde_yaml::Mapping::new();
+
+    // Обязательные поля
+    proxy.insert(
+        "name".into(),
+        serde_yaml::Value::String("amnezia-wg".to_string()),
+    );
+    proxy.insert(
+        "type".into(),
+        serde_yaml::Value::String("wireguard".to_string()),
+    );
+
+    if let Some(pk) = interface.get("privatekey") {
+        proxy.insert(
+            "private-key".into(),
+            serde_yaml::Value::String(pk.clone()),
+        );
+    } else {
+        return Err("Missing PrivateKey in [Interface] section".to_string());
+    }
+
+    if let Some(endpoint) = peer.get("endpoint") {
+        if let Some((srv, prt_str)) = endpoint.rsplit_once(':') {
+            proxy.insert("server".into(), serde_yaml::Value::String(srv.to_string()));
+            if let Ok(p) = prt_str.trim().parse::<u16>() {
+                proxy.insert("port".into(), serde_yaml::Value::Number(serde_yaml::Number::from(p)));
+            } else {
+                return Err(format!("Invalid port in Endpoint: {}", endpoint));
+            }
+        } else {
+            proxy.insert("server".into(), serde_yaml::Value::String(endpoint.clone()));
+            // port обязателен, если нет - ошибка
+            return Err("Endpoint must be in host:port format".to_string());
+        }
+    } else {
+        return Err("Missing Endpoint in [Peer] section".to_string());
+    }
+
+    // Address (может содержать IPv4 и/или IPv6)
+    if let Some(addr) = interface.get("address") {
+        for part in addr.split(',') {
+            let part = part.trim();
+            if part.is_empty() {
+                continue;
+            }
+            let ip_part = part.split('/').next().unwrap_or(part).trim();
+            if ip_part.contains(':') {
+                // IPv6
+                proxy.insert("ipv6".into(), serde_yaml::Value::String(ip_part.to_string()));
+            } else if ip_part.contains('.') {
+                proxy.insert("ip".into(), serde_yaml::Value::String(ip_part.to_string()));
+            }
+        }
+    }
+
+    if let Some(pubk) = peer.get("publickey") {
+        proxy.insert(
+            "public-key".into(),
+            serde_yaml::Value::String(pubk.clone()),
+        );
+    } else {
+        return Err("Missing PublicKey in [Peer] section".to_string());
+    }
+
+    if let Some(psk) = peer.get("presharedkey") {
+        proxy.insert(
+            "pre-shared-key".into(),
+            serde_yaml::Value::String(psk.clone()),
+        );
+    }
+
+    if let Some(allowed) = peer.get("allowedips") {
+        let ips: Vec<serde_yaml::Value> = allowed
+            .split(',')
+            .map(|s| serde_yaml::Value::String(s.trim().to_string()))
+            .collect();
+        proxy.insert("allowed-ips".into(), serde_yaml::Value::Sequence(ips));
+    } else {
+        // дефолт для full-tunnel
+        proxy.insert(
+            "allowed-ips".into(),
+            serde_yaml::Value::Sequence(vec![
+                serde_yaml::Value::String("0.0.0.0/0".to_string()),
+                serde_yaml::Value::String("::/0".to_string()),
+            ]),
+        );
+    }
+
+    // === AmneziaWG опции (если есть в [Interface]) ===
+    let mut amnezia = serde_yaml::Mapping::new();
+    let mut has_amnezia = false;
+
+    let amnezia_keys = ["jc", "jmin", "jmax", "s1", "s2", "s3", "s4", "h1", "h2", "h3", "h4"];
+    for key in amnezia_keys {
+        if let Some(v) = interface.get(key) {
+            if key.starts_with('h') {
+                // H-параметры всегда строка (могут быть диапазонами "123-456")
+                amnezia.insert(key.into(), serde_yaml::Value::String(v.clone()));
+                has_amnezia = true;
+            } else if let Ok(num) = v.parse::<i64>() {
+                amnezia.insert(key.into(), serde_yaml::Value::Number(serde_yaml::Number::from(num)));
+                has_amnezia = true;
+            }
+        }
+    }
+
+    if has_amnezia {
+        proxy.insert(
+            "amnezia-wg-option".into(),
+            serde_yaml::Value::Mapping(amnezia),
+        );
+
+        if proxy.get("mtu").is_none() {
+            proxy.insert(
+                "mtu".into(),
+                serde_yaml::Value::Number(serde_yaml::Number::from(1280u64)),
+            );
+        }
+
+        if proxy.get("remote-dns-resolve").is_none() {
+            proxy.insert("remote-dns-resolve".into(), serde_yaml::Value::Bool(true));
+        }
+    }
+
+    // === Важно для стабильности: persistent-keepalive ===
+    // Решает проблему "соединение теряется" на многих сетях (NAT timeout)
+    if proxy.get("persistent-keepalive").is_none() {
+        proxy.insert(
+            "persistent-keepalive".into(),
+            serde_yaml::Value::Number(serde_yaml::Number::from(25u64)),
+        );
+    }
+
+    // udp: true по умолчанию
+    if proxy.get("udp").is_none() {
+        proxy.insert("udp".into(), serde_yaml::Value::Bool(true));
+    }
+
+    Ok(serde_yaml::Value::Mapping(proxy))
+}
+
+#[allow(dead_code)]
+#[tauri::command(rename_all = "camelCase")]
+pub fn convert_amnezia_wg_conf(config_content: String) -> Result<String, String> {
+    let proxy_value = parse_amnezia_wg_conf(&config_content)?;
+    let yaml_str = serde_yaml::to_string(&proxy_value)
+        .map_err(|e| format!("Failed to serialize proxy to YAML: {}", e))?;
+    Ok(yaml_str)
+}
+
+/// Дополнительно: создаёт минимальный готовый Mihomo config из .conf AmneziaWG
+#[allow(dead_code)]
+#[tauri::command(rename_all = "camelCase")]
+pub fn import_amnezia_wg_as_config(
+    config_content: String,
+    proxy_name: Option<String>,
+) -> Result<String, String> {
+    let mut proxy = parse_amnezia_wg_conf(&config_content)?
+        .as_mapping()
+        .ok_or("Internal error: proxy is not a mapping")?
+        .clone();
+
+    if let Some(name) = proxy_name {
+        if !name.trim().is_empty() {
+            proxy.insert("name".into(), serde_yaml::Value::String(name));
+        }
+    }
+
+    // Получаем финальное имя прокси (нужно для proxy-groups)
+    let proxy_name_final = proxy
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("amnezia-wg")
+        .to_string();
+
+    let mut root = serde_yaml::Mapping::new();
+    root.insert(
+        "proxies".into(),
+        serde_yaml::Value::Sequence(vec![serde_yaml::Value::Mapping(proxy)]),
+    );
+
+    // Создаём proxy-groups (без этого MATCH,PROXY не сработает)
+    let proxy_group = serde_yaml::Mapping::from_iter([
+        ("name".into(), serde_yaml::Value::String("PROXY".to_string())),
+        ("type".into(), serde_yaml::Value::String("select".to_string())),
+        (
+            "proxies".into(),
+            serde_yaml::Value::Sequence(vec![
+                serde_yaml::Value::String(proxy_name_final),
+                serde_yaml::Value::String("DIRECT".to_string()),
+            ]),
+        ),
+    ]);
+    root.insert(
+        "proxy-groups".into(),
+        serde_yaml::Value::Sequence(vec![serde_yaml::Value::Mapping(proxy_group)]),
+    );
+
+    // Базовые настройки как в generate_config
+    root.insert(
+        "mode".into(),
+        serde_yaml::Value::String("rule".to_string()),
+    );
+    root.insert(
+        "log-level".into(),
+        serde_yaml::Value::String("info".to_string()),
+    );
+    root.insert(
+        "mixed-port".into(),
+        serde_yaml::Value::Number(serde_yaml::Number::from(7890u64)),
+    );
+    root.insert(
+        "external-controller".into(),
+        serde_yaml::Value::String("127.0.0.1:9090".to_string()),
+    );
+
+    // Простые правила по умолчанию (всё через VPN)
+    root.insert(
+        "rules".into(),
+        serde_yaml::Value::Sequence(vec![serde_yaml::Value::String(
+            "MATCH,PROXY".to_string(),
+        )]),
+    );
+
+    // Минимальный DNS (можно потом перегенерировать через generate_config)
+    let mut dns = serde_yaml::Mapping::new();
+    dns.insert("enable".into(), serde_yaml::Value::Bool(true));
+    dns.insert("ipv6".into(), serde_yaml::Value::Bool(true));
+    dns.insert(
+        "enhanced-mode".into(),
+        serde_yaml::Value::String("fake-ip".to_string()),
+    );
+    dns.insert(
+        "fake-ip-range".into(),
+        serde_yaml::Value::String("198.18.0.1/16".to_string()),
+    );
+    dns.insert(
+        "default-nameserver".into(),
+        serde_yaml::Value::Sequence(vec![
+            serde_yaml::Value::String("1.1.1.1".to_string()),
+            serde_yaml::Value::String("8.8.8.8".to_string()),
+        ]),
+    );
+    dns.insert(
+        "nameserver".into(),
+        serde_yaml::Value::Sequence(vec![
+            serde_yaml::Value::String("https://1.1.1.1/dns-query".to_string()),
+            serde_yaml::Value::String("https://8.8.8.8/dns-query".to_string()),
+        ]),
+    );
+    root.insert("dns".into(), serde_yaml::Value::Mapping(dns));
+
+    // TUN выключен по умолчанию (включай вручную если нужно)
+    let mut tun = serde_yaml::Mapping::new();
+    tun.insert("enable".into(), serde_yaml::Value::Bool(false));
+    tun.insert(
+        "stack".into(),
+        serde_yaml::Value::String("gvisor".to_string()),
+    );
+    root.insert("tun".into(), serde_yaml::Value::Mapping(tun));
+
+    serde_yaml::to_string(&root)
+        .map_err(|e| format!("Failed to serialize full config: {}", e))
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // ─── Tauri Commands ──────────────────────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -915,12 +1213,16 @@ pub fn parse_config(config_content: String) -> Result<ParsedConfig, String> {
 
     if let Some(proxy_list) = yaml.get("proxies").and_then(|p| p.as_sequence()) {
         for proxy in proxy_list {
-            if let (Some(name), Some(server), Some(port), Some(ptype)) = (
-                proxy.get("name").and_then(|v| v.as_str()),
-                proxy.get("server").and_then(|v| v.as_str()),
-                proxy.get("port").and_then(|v| v.as_u64()),
-                proxy.get("type").and_then(|v| v.as_str()),
-            ) {
+            let name = proxy.get("name").and_then(|v| v.as_str());
+            let server = proxy.get("server").and_then(|v| v.as_str());
+            let port = proxy.get("port").and_then(|v| {
+                v.as_u64().or_else(|| {
+                    v.as_str().and_then(|s| s.parse::<u64>().ok())
+                })
+            });
+            let ptype = proxy.get("type").and_then(|v| v.as_str());
+
+            if let (Some(name), Some(server), Some(port), Some(ptype)) = (name, server, port, ptype) {
                 if proxy_name.is_none() {
                     proxy_name = Some(name.to_string());
                     server_address = Some(server.to_string());

@@ -10,6 +10,9 @@ use mihomo::{
     save_rules_to_config, save_rules_to_path, start_vpn, stop_vpn, switch_mihomo_mode,
     switch_proxy_group,
     cleanup_mihomo, health_check, restore_config_backup,
+    // === НОВЫЕ КОМАНДЫ AmneziaWG ===
+    convert_amnezia_wg_conf,
+    import_amnezia_wg_as_config,
 };
 use process_scanner::get_running_processes;
 use updater::{check_for_updates, install_update};
@@ -45,7 +48,7 @@ fn build_tray_icon_png(vpn_enabled: bool) -> Result<tauri::image::Image<'static>
         let cx: i32 = w - (r + 3);
         let cy: i32 = h - (r + 3);
 
-        let fill = Rgba([59u8, 130u8, 246u8, 255u8]);
+        let fill = Rgba([59u8, 130u8, 255u8, 255u8]);
         let outline = Rgba([255u8, 255u8, 255u8, 230u8]);
 
         for y in (cy - r - 1)..=(cy + r + 1) {
@@ -265,6 +268,9 @@ pub fn run() {
             // ── Updater ──
             check_for_updates,
             install_update,
+            // === НОВЫЕ КОМАНДЫ ДЛЯ AMNEZIAWG ===
+            convert_amnezia_wg_conf,
+            import_amnezia_wg_as_config,
         ])
         // ═══ .run() → .build().run() для перехвата Exit ═══
         .build(tauri::generate_context!())
@@ -274,7 +280,6 @@ pub fn run() {
                 cleanup_mihomo();
             }
             RunEvent::ExitRequested { api, .. } => {
-                // Не блокируем выход — cleanup уже в Exit
                 let _ = api;
             }
             _ => {}
