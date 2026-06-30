@@ -14,6 +14,7 @@ import { useTagsStorage } from './hooks/useTagsStorage';
 import type { Rule, Tag, Log, LogLevel, Config, ParsedConfig } from './types';
 import { useI18n } from './i18n';
 import { isTauri } from './utils/isTauri';
+import { syncAutostart } from './utils/autostart';
 
 const EMPTY_LOGS: Log[] = [];
 const HOME_SNAPSHOT_KEY = 'vpn-home-display-snapshot';
@@ -389,6 +390,18 @@ export default function App() {
     };
     run();
   }, [settings.startminimized]);
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    const run = async () => {
+      try {
+        await syncAutostart(settings.autostart);
+      } catch (e) {
+        console.error('Failed to sync autostart:', e);
+      }
+    };
+    run();
+  }, [settings.autostart]);
 
   useEffect(() => {
     if (!isTauri()) return;

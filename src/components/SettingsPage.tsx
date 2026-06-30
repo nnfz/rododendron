@@ -18,6 +18,11 @@ import type { Language } from '../i18n/translations';
 import type { Settings, Config, ParsedConfig } from '../types';
 import type { CSSProperties, Dispatch, SetStateAction } from 'react';
 import { isTauri } from '../utils/isTauri';
+import {
+  disableAutostart,
+  enableAutostart,
+  isAutostartEnabled,
+} from '../utils/autostart';
 
 interface SettingsPageProps {
   setShowLogsModal: (show: boolean) => void;
@@ -57,22 +62,6 @@ const EASTER_EGG_IMAGE_URLS: string[] = [
   'https://sun9-79.userapi.com/s/v1/ig2/Uf0zlawdQDvRUd4-OmlD8gGTcjJ8SUuOH4bm_x2m9yaiMyAaYSeT_SCfdQs-PHxKY1hKqqOxZLqWnvzueo2iuTtZ.jpg?quality=95&as=32x32,48x48,72x72,108x108,160x160,240x240,300x300&from=bu&cs=300x0',
   'https://sun9-15.userapi.com/s/v1/ig2/QJ-d3NRMWhjIgbWkQ4BAMEweNhpfEsxSmvvJzltIZ_rdryR-5hIH4GYBHVmG7V7aTu4P1BGgzAVQduWf5ibgFKpI.jpg?quality=95&as=32x48,48x72,72x108,108x162,160x240,183x275&from=bu&cs=183x0',
 ];
-
-const autostartPlugin = {
-  async enable() {
-    const { enable } = await import('@tauri-apps/plugin-autostart');
-    await enable();
-  },
-  async disable() {
-    const { disable } = await import('@tauri-apps/plugin-autostart');
-    await disable();
-  },
-  async isEnabled(): Promise<boolean> {
-    if (import.meta.env.DEV) return false;
-    const { isEnabled } = await import('@tauri-apps/plugin-autostart');
-    return isEnabled();
-  },
-};
 
 // ─── Парсеры протокольных ссылок ─────────────────────────────────────────────
 
@@ -801,8 +790,7 @@ function SettingsPage({
   useEffect(() => {
     if (!isTauri()) return;
     let cancelled = false;
-    autostartPlugin
-      .isEnabled()
+    isAutostartEnabled()
       .then((enabled) => {
         if (!cancelled) setSettings((prev) => ({ ...prev, autostart: enabled }));
       })
@@ -839,8 +827,8 @@ function SettingsPage({
         if (key === 'autostart') {
           if (!isTauri()) return;
           try {
-            if (nextValue) await autostartPlugin.enable();
-            else await autostartPlugin.disable();
+            if (nextValue) await enableAutostart();
+            else await disableAutostart();
           } catch (e) {
             console.error('Failed to set autostart:', e);
             setSettings((prev) => ({ ...prev, [key]: !nextValue }));

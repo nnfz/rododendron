@@ -13,6 +13,9 @@
     "fs:allow-read",
     "fs:allow-write",
     "core:window:allow-start-dragging",
-    "fs:allow-write-text-file"
+    "fs:allow-write-text-file",
+    "autostart:allow-enable",
+    "autostart:allow-disable",
+    "autostart:allow-is-enabled"
   ]
 }

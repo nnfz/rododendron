@@ -25,8 +25,6 @@ use tauri::{
     tray::TrayIconBuilder,
 };
 use tauri::RunEvent;
-use tauri_plugin_autostart::MacosLauncher;
-
 use image::codecs::png::PngEncoder;
 use image::ColorType;
 use image::ImageEncoder;
@@ -127,10 +125,11 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_autostart::init(
-            MacosLauncher::LaunchAgent,
-            None,
-        ))
+        .plugin(
+            tauri_plugin_autostart::Builder::new()
+                .app_name("Rododendron")
+                .build(),
+        )
         .setup(|app| {
             // ── Tray icon ──
             let icon = build_tray_icon_png(false)?;
