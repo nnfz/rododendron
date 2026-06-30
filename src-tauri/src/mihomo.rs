@@ -1285,6 +1285,8 @@ pub fn generate_config(
     enable_tun: bool,
     mtu: Option<u32>,
     kill_switch: bool,
+    tun_stack: Option<String>,
+    fake_ip_filter: Option<Vec<String>>,
 ) -> Result<String, String> {
     let _ = kill_switch;
     let mut yaml: serde_yaml::Value = serde_yaml::from_str(&base_config)
@@ -1318,10 +1320,11 @@ pub fn generate_config(
         "auto-detect-interface".into(),
         serde_yaml::Value::Bool(true),
     );
-    tun.insert(
-        "stack".into(),
-        serde_yaml::Value::String("gvisor".to_string()),
-    );
+    let stack_value = tun_stack
+        .as_deref()
+        .unwrap_or("gvisor")
+        .to_string();
+    tun.insert("stack".into(), serde_yaml::Value::String(stack_value));
     tun.insert("auto-route".into(), serde_yaml::Value::Bool(true));
     tun.insert(
         "device".into(),
@@ -1330,6 +1333,10 @@ pub fn generate_config(
     tun.insert(
         "dns-hijack".into(),
         serde_yaml::Value::Sequence(vec![serde_yaml::Value::String("any:53".to_string())]),
+    );
+    tun.insert(
+        "endpoint-independent-nat".into(),
+        serde_yaml::Value::Bool(true),
     );
     yaml["tun"] = serde_yaml::Value::Mapping(tun);
 
@@ -1395,13 +1402,18 @@ pub fn generate_config(
     );
     dns.insert("cache".into(), serde_yaml::Value::Mapping(cache));
 
-    dns.insert(
-        "fake-ip-filter".into(),
-        serde_yaml::Value::Sequence(vec![
-            serde_yaml::Value::String("*.lan".to_string()),
-            serde_yaml::Value::String("*.local".to_string()),
-        ]),
-    );
+    {
+        let default_filters = vec!["*.lan".to_string(), "*.local".to_string()];
+        let filters = fake_ip_filter.unwrap_or(default_filters);
+        let filter_values: Vec<serde_yaml::Value> = filters
+            .into_iter()
+            .map(serde_yaml::Value::String)
+            .collect();
+        dns.insert(
+            "fake-ip-filter".into(),
+            serde_yaml::Value::Sequence(filter_values),
+        );
+    }
 
     yaml["dns"] = serde_yaml::Value::Mapping(dns);
     yaml["tcp-concurrent"] = serde_yaml::Value::Bool(true);

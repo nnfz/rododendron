@@ -99,6 +99,15 @@ export type Translations = {
     logLevel: string;
     mtu: string;
     mtuHelp: string;
+    tunStack: string;
+    tunStackHelp: string;
+    tunStackGvisor: string;
+    tunStackMixed: string;
+    tunStackSystem: string;
+    fakeIpFilter: string;
+    fakeIpFilterHelp: string;
+    fakeIpFilterAdd: string;
+    fakeIpFilterPlaceholder: string;
     checkUpdates: string;
     checkingUpdates: string;
     updateAvailable: string;
@@ -238,6 +247,15 @@ export const translations: Record<Language, Translations> = {
       enableTun: 'Enable TUN',
       mtu: 'MTU',
       mtuHelp: 'Maximum packet size. Lower it if you have connection issues; 1500 is default.',
+      tunStack: 'TUN Stack',
+      tunStackHelp: 'gvisor — full userspace (stable). mixed — TCP via gvisor, UDP via system kernel (best for games). system — all via kernel.',
+      tunStackGvisor: 'gvisor',
+      tunStackMixed: 'mixed',
+      tunStackSystem: 'system',
+      fakeIpFilter: 'Fake-IP Filter',
+      fakeIpFilterHelp: 'Domains bypassing Fake-IP. Games, STUN servers and OS connectivity checks should be here to avoid NAT issues.',
+      fakeIpFilterAdd: 'Add domain',
+      fakeIpFilterPlaceholder: '*.example.com',
       checkUpdates: 'Check for updates',
       checkingUpdates: 'Checking...',
       updateAvailable: 'Update available: v{version}',
@@ -374,6 +392,15 @@ export const translations: Record<Language, Translations> = {
       logLevel: 'Уровень логов',
       mtu: 'MTU',
       mtuHelp: 'Макс. размер пакета. Уменьши, если есть проблемы с подключением; 1500 по умолчанию.',
+      tunStack: 'Стек TUN',
+      tunStackHelp: 'gvisor — полностью в юзерспейсе (стабильно). mixed — TCP через gvisor, UDP через ядро (лучше для игр). system — всё через ядро.',
+      tunStackGvisor: 'gvisor',
+      tunStackMixed: 'mixed',
+      tunStackSystem: 'system',
+      fakeIpFilter: 'Фильтр Fake-IP',
+      fakeIpFilterHelp: 'Домены, обходящие Fake-IP. Игры, STUN-серверы и проверки ОС должны быть здесь для корректного NAT.',
+      fakeIpFilterAdd: 'Добавить домен',
+      fakeIpFilterPlaceholder: '*.example.com',
       checkUpdates: 'Проверить обновления',
       checkingUpdates: 'Проверка...',
       updateAvailable: 'Доступно обновление: v{version}',
@@ -511,6 +538,15 @@ export const translations: Record<Language, Translations> = {
       logLevel: 'Узровень логаў',
       mtu: 'MTU',
       mtuHelp: 'Макс. памер пакета. Паменшы, калі ёсць праблемы з падключэннем; 1500 па змаўчанні.',
+      tunStack: 'Стэк TUN',
+      tunStackHelp: 'gvisor — поўнасцю ў юзерспэйсе (стабільна). mixed — TCP праз gvisor, UDP праз ядро (лепш для гульняў). system — усё праз ядро.',
+      tunStackGvisor: 'gvisor',
+      tunStackMixed: 'mixed',
+      tunStackSystem: 'system',
+      fakeIpFilter: 'Фільтр Fake-IP',
+      fakeIpFilterHelp: 'Дамены, якія абыходзяць Fake-IP. Гульні, STUN-серверы і праверкі ОС павінны быць тут для карэктнага NAT.',
+      fakeIpFilterAdd: 'Дадаць дамен',
+      fakeIpFilterPlaceholder: '*.example.com',
       checkUpdates: 'Праверыць абнаўленні',
       checkingUpdates: 'Праверка...',
       updateAvailable: 'Даступна абнаўленне: v{version}',

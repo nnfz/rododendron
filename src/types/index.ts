@@ -33,6 +33,8 @@ export interface Settings {
   logLevel: string;
   mtu: string;
   enableTun: boolean;
+  tunStack: 'gvisor' | 'mixed' | 'system';
+  fakeIpFilter: string[];
   snowfall: boolean;
 }
 

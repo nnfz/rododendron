@@ -10,6 +10,7 @@ import {
   LuX,
   LuPencil,
   LuSave,
+  LuPlus,
 } from 'react-icons/lu';
 import CustomSelect from './CustomSelect';
 import { useI18n } from '../i18n';
@@ -768,6 +769,9 @@ function SettingsPage({
   const [showEasterEggModal, setShowEasterEggModal] = useState(false);
   const [easterEggImageUrl, setEasterEggImageUrl] = useState<string | null>(null);
 
+  // Fake-IP filter input
+  const [fakeIpDraft, setFakeIpDraft] = useState('');
+
   // Sync mtuDraft when settings.mtu changes externally
   useEffect(() => {
     setMtuDraft(settings.mtu);
@@ -845,7 +849,7 @@ function SettingsPage({
         }
 
         // These settings require VPN restart — signal via sidebar button
-        const settingsRequiringRestart: (keyof Settings)[] = ['enableTun', 'killSwitch'];
+        const settingsRequiringRestart: (keyof Settings)[] = ['enableTun', 'killSwitch', 'tunStack', 'fakeIpFilter'];
         if (vpnEnabled && settingsRequiringRestart.includes(key)) {
           setNeedsRestart(true);
         }
@@ -1174,6 +1178,15 @@ const handleImportConfig = useCallback(
     [t.settings],
   );
 
+  const tunStackOptions = useMemo(
+    () => [
+      { value: 'gvisor', label: t.settings.tunStackGvisor },
+      { value: 'mixed', label: t.settings.tunStackMixed },
+      { value: 'system', label: t.settings.tunStackSystem },
+    ],
+    [t.settings],
+  );
+
   const mihomoCoreDisplayName = useMemo(() => {
     return `${mihomoCoreName} ${MIHOMO_CORE_VERSION}`;
   }, [mihomoCoreName]);
@@ -1465,6 +1478,108 @@ const handleImportConfig = useCallback(
                 className={`input ${mtuError ? 'input-error input-shake' : ''}`}
                 placeholder={`${MTU_MIN}–${MTU_MAX}`}
               />
+            </div>
+            <div className="panel-row disabled">
+              <span className="setting-label setting-label-with-help">
+                {t.settings.tunStack}
+                <button
+                  type="button"
+                  className="help-tooltip"
+                  onClick={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  <LuHelpCircle size={14} className="help-icon" />
+                  <span className="help-tooltip-content">{t.settings.tunStackHelp}</span>
+                </button>
+              </span>
+              <CustomSelect
+                value={settings.tunStack}
+                onChange={(value) => {
+                  setSettings((prev) => ({
+                    ...prev,
+                    tunStack: value as Settings['tunStack'],
+                  }));
+                  if (vpnEnabled) setNeedsRestart(true);
+                }}
+                options={tunStackOptions}
+              />
+            </div>
+            <div className="panel-row disabled" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '8px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span className="setting-label setting-label-with-help">
+                  {t.settings.fakeIpFilter}
+                  <button
+                    type="button"
+                    className="help-tooltip"
+                    onClick={(e) => e.stopPropagation()}
+                    onMouseDown={(e) => e.stopPropagation()}
+                  >
+                    <LuHelpCircle size={14} className="help-icon" />
+                    <span className="help-tooltip-content">{t.settings.fakeIpFilterHelp}</span>
+                  </button>
+                </span>
+              </div>
+              <div className="fake-ip-filter-list">
+                {settings.fakeIpFilter.map((filter, idx) => (
+                  <div key={idx} className="fake-ip-filter-item">
+                    <span className="fake-ip-filter-text">{filter}</span>
+                    <button
+                      type="button"
+                      className="fake-ip-filter-remove"
+                      onClick={() => {
+                        setSettings((prev) => ({
+                          ...prev,
+                          fakeIpFilter: prev.fakeIpFilter.filter((_, i) => i !== idx),
+                        }));
+                        if (vpnEnabled) setNeedsRestart(true);
+                      }}
+                      aria-label="Remove"
+                    >
+                      <LuX size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <div className="fake-ip-filter-add-row">
+                <input
+                  type="text"
+                  className="input fake-ip-filter-input"
+                  value={fakeIpDraft}
+                  onChange={(e) => setFakeIpDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      const val = fakeIpDraft.trim();
+                      if (val && !settings.fakeIpFilter.includes(val)) {
+                        setSettings((prev) => ({
+                          ...prev,
+                          fakeIpFilter: [...prev.fakeIpFilter, val],
+                        }));
+                        setFakeIpDraft('');
+                        if (vpnEnabled) setNeedsRestart(true);
+                      }
+                    }
+                  }}
+                  placeholder={t.settings.fakeIpFilterPlaceholder}
+                />
+                <button
+                  type="button"
+                  className="btn btn-ghost-dark fake-ip-filter-add-btn"
+                  onClick={() => {
+                    const val = fakeIpDraft.trim();
+                    if (val && !settings.fakeIpFilter.includes(val)) {
+                      setSettings((prev) => ({
+                        ...prev,
+                        fakeIpFilter: [...prev.fakeIpFilter, val],
+                      }));
+                      setFakeIpDraft('');
+                      if (vpnEnabled) setNeedsRestart(true);
+                    }
+                  }}
+                >
+                  <LuPlus size={16} />
+                  <span>{t.settings.fakeIpFilterAdd}</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

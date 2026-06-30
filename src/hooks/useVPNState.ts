@@ -9,7 +9,9 @@ type StartVPNFn = (
   logLevel: string,
   enableTun?: boolean,
   mtu?: string,
-  killSwitch?: boolean
+  killSwitch?: boolean,
+  tunStack?: string,
+  fakeIpFilter?: string[]
 ) => Promise<void>;
 
 type StopVPNFn = () => Promise<void>;
@@ -21,7 +23,9 @@ type ToggleVPNFn = (
   logLevel?: string,
   enableTun?: boolean,
   mtu?: string,
-  killSwitch?: boolean
+  killSwitch?: boolean,
+  tunStack?: string,
+  fakeIpFilter?: string[]
 ) => Promise<void>;
 
 export interface VPNState {
@@ -62,7 +66,9 @@ export function useVPNState(): VPNState {
     logLevel: string, 
     enableTun: boolean = true,
     mtu?: string,
-    killSwitch: boolean = false
+    killSwitch: boolean = false,
+    tunStack?: string,
+    fakeIpFilter?: string[]
   ) => {
     if (!isTauri()) {
       setVpnEnabled(true);
@@ -93,6 +99,8 @@ export function useVPNState(): VPNState {
         enableTun,
         mtu: mtuValue,
         killSwitch,
+        tunStack: tunStack || null,
+        fakeIpFilter: fakeIpFilter || null,
       }) as string;
 
       const status = await invoke('start_vpn', {
@@ -144,12 +152,14 @@ export function useVPNState(): VPNState {
     logLevel?: string,
     enableTun?: boolean,
     mtu?: string,
-    killSwitch?: boolean
+    killSwitch?: boolean,
+    tunStack?: string,
+    fakeIpFilter?: string[]
   ) => {
     if (vpnEnabled) {
       await stopVPN();
     } else if (configContent && configFilename && rules && logLevel !== undefined) {
-      await startVPN(configContent, configFilename, rules, logLevel, enableTun, mtu, killSwitch);
+      await startVPN(configContent, configFilename, rules, logLevel, enableTun, mtu, killSwitch, tunStack, fakeIpFilter);
     }
   }, [vpnEnabled, startVPN, stopVPN]);
 
