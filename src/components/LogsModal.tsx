@@ -2,7 +2,7 @@ import { memo, useCallback, useState, useEffect, useMemo, useRef } from 'react';
 import { LuDownload, LuX, LuLoader2, LuTrash2} from 'react-icons/lu';
 import { useI18n } from '../i18n';
 import CustomSelect from './CustomSelect';
-import type { Log, LogLevel, Settings } from '../types';
+import type { Log, LogLevel } from '../types';
 import type { Dispatch, SetStateAction } from 'react';
 import { isTauri } from '../utils/isTauri';
 
@@ -11,8 +11,6 @@ interface LogsModalProps {
   setShowLogsModal: (show: boolean) => void;
   logs: Log[];
   setLogs: Dispatch<SetStateAction<Log[]>>;
-  settings: Settings;
-  setSettings: Dispatch<SetStateAction<Settings>>;
   vpnEnabled: boolean;
 }
 
@@ -41,11 +39,10 @@ function LogsModal({
   setShowLogsModal, 
   logs, 
   setLogs,
-  settings, 
-  setSettings,
   vpnEnabled 
 }: LogsModalProps) {
   const { t } = useI18n();
+  const [logFilterLevel, setLogFilterLevel] = useState('info');
   const [isExporting, setIsExporting] = useState(false);
   const [mihomoLogs, setMihomoLogs] = useState<MihomoLog[]>([]);
   const [query, setQuery] = useState('');
@@ -117,7 +114,7 @@ function LogsModal({
   };
 
   const minLevelRank = useMemo(() => {
-    const v = (settings.logLevel || 'info').toLowerCase();
+    const v = (logFilterLevel || 'info').toLowerCase();
     switch (v) {
       case 'debug':
         return levelRank('DEBUG');
@@ -130,7 +127,7 @@ function LogsModal({
       default:
         return levelRank('INFO');
     }
-  }, [settings.logLevel]);
+  }, [logFilterLevel]);
 
   // Объединяем все логи и сортируем по ID в ОБРАТНОМ порядке (новые сверху)
   const allLogs = useMemo(() => {
@@ -246,8 +243,8 @@ function LogsModal({
             <div className="log-level-select">
               <span className="log-level-label">{t.settings.logLevel}:</span>
               <CustomSelect 
-                value={settings.logLevel} 
-                onChange={val => setSettings(prev => ({ ...prev, logLevel: val }))} 
+                value={logFilterLevel} 
+                onChange={val => setLogFilterLevel(val)} 
                 options={LOG_LEVEL_OPTIONS}
                 className="input-logs"
               />

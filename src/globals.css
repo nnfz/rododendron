@@ -7,8 +7,8 @@
   --titlebg: rgba(5, 5, 5, .8);
   --fg: #efefef;
   --muted: #6b7280;
-  --border: rgba(55, 55, 60, 0.6);
-  --surface: rgba(20, 20, 20, 0.6);
+  --border: rgba(55, 55, 60, 0.4);
+  --surface: rgba(20, 20, 20, 0.4);
   --accent: rgb(47, 150, 255);
   --red: #ef4444;
   --orange: #ef9744;
@@ -611,6 +611,7 @@ body {
   position: relative;
   transition: background-color 0.15s;
   background: var(--border);
+  border: none;
   cursor: pointer;
 }
 
@@ -720,8 +721,7 @@ select.input option {
 /* Custom Select Component */
 .custom-select-container {
   position: relative;
-  min-width: 11rem;
-  z-index: 10000;
+  min-width: 10rem;
 }
 
 .input-logs {
@@ -778,8 +778,9 @@ select.input option {
   top: calc(100% + 0.5rem);
   left: 0;
   right: 0;
-  background: var(--bg);
+  background: var(--sidebg);
   border: 1px solid var(--border);
+  backdrop-filter: blur(8px);
   border-radius: 0.5rem;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
   z-index: 1000;
@@ -798,8 +799,7 @@ select.input option {
   font-size: 0.875rem;
   cursor: pointer;
   text-align: left;
-  transition: background-color 0.15s;
-  border-bottom: 1px solid rgba(55, 55, 60, 0.08);
+  transition: 0.3s ease;
 }
 
 .custom-select-option:last-child {
@@ -825,7 +825,7 @@ select.input option {
   display: inline-flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.75rem 1.25rem;
+  padding: 0.75rem 1rem;
   border-radius: 0.5rem;
   border: none;
   cursor: pointer;
@@ -2569,11 +2569,40 @@ select.input option {
 /* ─── Config Editor Modal ─────────────────────────────── */
 
 .config-editor-modal {
-  width: 90vw;
-  max-width: 800px;
-  height: 80vh;
+  width: min(92vw, 720px);
+  max-height: min(88vh, 760px);
   display: flex;
   flex-direction: column;
+}
+
+.config-editor-header {
+  gap: 12px;
+}
+
+.config-editor-open-file {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  aspect-ratio: 1;
+  padding: 12px;
+  font-size: 0.82rem;
+}
+
+.config-editor-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  font-size: 1rem;
+}
+
+.config-editor-subtitle {
+  font-size: 0.78rem;
+  font-weight: 500;
+  opacity: 0.65;
 }
 
 .config-editor-body {
@@ -2584,28 +2613,130 @@ select.input option {
   padding: 0 !important;
 }
 
-.config-editor-textarea {
+.config-editor-sections {
   flex: 1;
-  width: 100%;
-  resize: none;
-  border: none;
-  outline: none;
-  padding: 16px;
-  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Consolas', monospace;
-  font-size: 13px;
-  line-height: 1.6;
-  tab-size: 2;
-  background: var(--color-bg, #1a1a2e);
-  color: var(--color-text, #e0e0e0);
-  overflow: auto;
+  overflow-y: auto;
+  padding: 16px 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
 }
 
-.config-editor-textarea:focus {
-  outline: none;
+.config-editor-section-title {
+  margin: 0 0 8px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.55;
+}
+
+.config-editor-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+
+.config-editor-panel .config-field-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.config-editor-panel .config-field-row:last-child {
+  border-bottom: none;
+}
+
+.config-editor-panel .config-field-row.is-multiline {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.config-field-control {
+  flex-shrink: 0;
+  display: flex;
+  min-width: 160px;
+  max-width: 280px;
+  width: 100%;
+  justify-content: flex-end;
+}
+
+.config-field-row.is-multiline .config-field-control {
+  max-width: none;
+  justify-content: stretch;
+}
+
+.config-field-input {
+  width: 160px;
+  text-align: right;
+}
+
+.config-field-row.is-multiline .config-field-input {
+  width: 100%;
+  text-align: left;
+}
+
+.config-custom-key-input {
+  width: 180px;
+  text-align: left;
+  font-size: 0.85rem;
+}
+
+.config-field-list-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.config-custom-field-wrap {
+  position: relative;
+  border-bottom: 1px solid var(--border);
+}
+
+.config-custom-field-wrap:last-child {
+  border-bottom: none;
+}
+
+.config-custom-field-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.config-custom-field-remove:hover {
+  background: rgba(255, 68, 68, 0.12);
+  color: #f66;
+}
+
+.config-editor-empty {
+  padding: 14px;
+  font-size: 0.85rem;
+  opacity: 0.6;
+}
+
+.config-editor-loading {
+  padding: 24px 18px;
+  font-size: 0.9rem;
+  opacity: 0.7;
 }
 
 .config-editor-error {
-  padding: 8px 16px;
+  padding: 10px 16px;
   background: rgba(255, 68, 68, 0.15);
   color: #f44;
   font-size: 13px;

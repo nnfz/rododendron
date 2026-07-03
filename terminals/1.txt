@@ -1,0 +1,17 @@
+---
+pid: 38276
+cwd: "Z:\code\rododendron"
+command: "cd \"Z:\\code\\rododendron\"; npm install yaml"
+started_at: 2026-07-03T16:25:07.292Z
+running_for_ms: 1985005  
+---
+npm error code ETIMEDOUT
+npm error syscall connect
+npm error errno ETIMEDOUT
+npm error network request to https://registry.npmjs.org/yaml failed, reason: connect ETIMEDOUT 198.18.0.122:443
+npm error network This is a problem related to network connectivity.
+npm error network In most cases you are behind a proxy or have bad network settings.
+npm error network
+npm error network If you are behind a proxy, please make sure that the
+npm error network 'proxy' config is set properly.  See: 'npm help config'
+npm error A complete log of this run can be found in: C:\Users\botni\AppData\Local\npm-cache\_logs\2026-07-03T16_25_07_773Z-debug-0.log

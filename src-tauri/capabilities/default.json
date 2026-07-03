@@ -16,6 +16,7 @@
     "fs:allow-write-text-file",
     "autostart:allow-enable",
     "autostart:allow-disable",
-    "autostart:allow-is-enabled"
+    "autostart:allow-is-enabled",
+    "opener:allow-open-path"
   ]
 }

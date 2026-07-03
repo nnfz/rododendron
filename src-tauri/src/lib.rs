@@ -6,7 +6,8 @@ use mihomo::{
     clear_mihomo_logs, delete_config, export_config_to_path, generate_config,
     get_mihomo_binary_name, get_mihomo_logs, get_vpn_status, import_config, list_configs,
     mihomo_get_connections, mihomo_get_delay, mihomo_get_proxies, mihomo_get_traffic,
-    parse_config, ping_host, read_config, reload_mihomo_config, resolve_config_path,
+    parse_config, parse_config_yaml, ping_host, read_config, reload_mihomo_config,
+    resolve_config_path, stringify_config_yaml,
     save_rules_to_config, save_rules_to_path, start_vpn, stop_vpn, switch_mihomo_mode,
     switch_proxy_group,
     cleanup_mihomo, health_check, restore_config_backup,
@@ -231,6 +232,8 @@ pub fn run() {
             get_running_processes,
             // ── Config management ──
             parse_config,
+            parse_config_yaml,
+            stringify_config_yaml,
             generate_config,
             import_config,
             read_config,

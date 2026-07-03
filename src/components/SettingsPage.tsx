@@ -9,10 +9,9 @@ import {
   LuTrash2,
   LuX,
   LuPencil,
-  LuSave,
-  LuPlus,
 } from 'react-icons/lu';
 import CustomSelect from './CustomSelect';
+import ConfigEditorModal from './ConfigEditorModal';
 import { useI18n } from '../i18n';
 import type { Language } from '../i18n/translations';
 import type { Settings, Config, ParsedConfig } from '../types';
@@ -48,9 +47,6 @@ type UpdateCheckResult = {
   release_notes?: string | null;
 };
 
-const MTU_MIN = 1280;
-const MTU_MAX = 1500;
-const MTU_DEFAULT = '1500';
 const DELETE_CONFIRM_TIMEOUT = 3000;
 const MIHOMO_CORE_VERSION = '1.19.20';
 
@@ -737,8 +733,6 @@ function SettingsPage({
   const deleteConfirmTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [mtuError, setMtuError] = useState(false);
-  const [mtuDraft, setMtuDraft] = useState(settings.mtu);
   const [updateCheck, setUpdateCheck] = useState<UpdateCheckResult | null>(null);
   const [updateStatusText, setUpdateStatusText] = useState<string | null>(null);
   const [isCheckingUpdates, setIsCheckingUpdates] = useState(false);
@@ -747,24 +741,12 @@ function SettingsPage({
   const [vlessImportError, setVlessImportError] = useState<string | null>(null);
   const [isImportingVless, setIsImportingVless] = useState(false);
 
-  // Config editor modal
   const [showConfigEditor, setShowConfigEditor] = useState(false);
-  const [configEditorContent, setConfigEditorContent] = useState('');
-  const [configEditorError, setConfigEditorError] = useState<string | null>(null);
-  const [isSavingConfig, setIsSavingConfig] = useState(false);
 
   const [versionClickCount, setVersionClickCount] = useState(0);
   const [versionKickColor, setVersionKickColor] = useState<string | null>(null);
   const [showEasterEggModal, setShowEasterEggModal] = useState(false);
   const [easterEggImageUrl, setEasterEggImageUrl] = useState<string | null>(null);
-
-  // Fake-IP filter input
-  const [fakeIpDraft, setFakeIpDraft] = useState('');
-
-  // Sync mtuDraft when settings.mtu changes externally
-  useEffect(() => {
-    setMtuDraft(settings.mtu);
-  }, [settings.mtu]);
 
   useEffect(() => {
     let cancelled = false;
@@ -837,7 +819,7 @@ function SettingsPage({
         }
 
         // These settings require VPN restart — signal via sidebar button
-        const settingsRequiringRestart: (keyof Settings)[] = ['enableTun', 'killSwitch', 'tunStack', 'fakeIpFilter'];
+        const settingsRequiringRestart: (keyof Settings)[] = ['killSwitch'];
         if (vpnEnabled && settingsRequiringRestart.includes(key)) {
           setNeedsRestart(true);
         }
@@ -892,43 +874,6 @@ function SettingsPage({
       setIsInstallingUpdate(false);
     }
   }, [t.settings, updateCheck?.update_available]);
-
-  // MTU: free typing in draft, validate only on blur/enter
-  const handleMtuDraftChange = useCallback((value: string) => {
-    setMtuDraft(value.replace(/\D/g, ''));
-  }, []);
-
-  const handleMtuBlur = useCallback(() => {
-    const raw = mtuDraft.trim();
-    if (!raw) {
-      setMtuDraft(MTU_DEFAULT);
-      setSettings((prev) => ({ ...prev, mtu: MTU_DEFAULT }));
-      if (vpnEnabled) setNeedsRestart(true);
-      return;
-    }
-    const numValue = parseInt(raw, 10);
-    if (isNaN(numValue) || numValue < MTU_MIN || numValue > MTU_MAX) {
-      setMtuError(true);
-      setTimeout(() => setMtuError(false), 400);
-      setMtuDraft(settings.mtu);
-      return;
-    }
-    const strValue = String(numValue);
-    if (strValue !== settings.mtu) {
-      setSettings((prev) => ({ ...prev, mtu: strValue }));
-      setMtuDraft(strValue);
-      if (vpnEnabled) setNeedsRestart(true);
-    }
-  }, [mtuDraft, settings.mtu, setSettings, vpnEnabled, setNeedsRestart]);
-
-  const handleMtuKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === 'Enter') {
-        e.currentTarget.blur();
-      }
-    },
-    [],
-  );
 
 const handleImportConfig = useCallback(
     async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -1076,75 +1021,18 @@ const handleImportConfig = useCallback(
 
   // ─── Config Editor ──────────────────────────────────────────────────────────
 
-  const handleOpenConfigEditor = useCallback(async () => {
-    if (!activeConfigId || !isTauri()) return;
-    const config = configs.find((c) => c.id === activeConfigId);
-    if (!config?.filename) return;
-
-    try {
-      const { invoke } = await import('@tauri-apps/api/core');
-      const content = await invoke<string>('read_config', { filename: config.filename });
-      setConfigEditorContent(content);
-      setConfigEditorError(null);
-      setShowConfigEditor(true);
-    } catch (e) {
-      console.error('Failed to read config:', e);
-    }
-  }, [activeConfigId, configs]);
-
-  const handleSaveConfigEditor = useCallback(async () => {
-    if (!activeConfigId || !isTauri()) return;
-    const config = configs.find((c) => c.id === activeConfigId);
-    if (!config?.filename) return;
-
-    setIsSavingConfig(true);
-    setConfigEditorError(null);
-
-    try {
-      const { invoke } = await import('@tauri-apps/api/core');
-
-      // Validate YAML
-      let parsed: ParsedConfig;
-      try {
-        parsed = await invoke<ParsedConfig>('parse_config', {
-          configContent: configEditorContent,
-        });
-      } catch (e) {
-        setConfigEditorError(`Invalid config: ${e}`);
-        setIsSavingConfig(false);
-        return;
-      }
-
-      // Save to file
-      await invoke('import_config', {
-        configContent: configEditorContent,
-        filename: config.filename,
-      });
-
-      // Update parent state so useConfigStorage won't reload stale content
-      setActiveConfigContent(configEditorContent);
+  const handleConfigSaved = useCallback(
+    (content: string, parsed: ParsedConfig) => {
+      setActiveConfigContent(content);
       setParsedConfig(parsed);
+    },
+    [setActiveConfigContent, setParsedConfig],
+  );
 
-      setShowConfigEditor(false);
-
-      // Signal restart needed — user clicks sidebar button
-      if (vpnEnabled) {
-        setNeedsRestart(true);
-      }
-    } catch (e) {
-      setConfigEditorError(`Failed to save: ${e}`);
-    } finally {
-      setIsSavingConfig(false);
-    }
-  }, [
-    activeConfigId,
-    configs,
-    configEditorContent,
-    vpnEnabled,
-    setActiveConfigContent,
-    setParsedConfig,
-    setNeedsRestart,
-  ]);
+  const activeConfig = useMemo(
+    () => configs.find((c) => c.id === activeConfigId) ?? null,
+    [configs, activeConfigId],
+  );
 
   const handleLanguageChange = useCallback(
     (lang: Language) => {
@@ -1162,15 +1050,6 @@ const handleImportConfig = useCallback(
     () => [
       { value: 'tray', label: t.settings.closeToTray },
       { value: 'exit', label: t.settings.closeExit },
-    ],
-    [t.settings],
-  );
-
-  const tunStackOptions = useMemo(
-    () => [
-      { value: 'gvisor', label: t.settings.tunStackGvisor },
-      { value: 'mixed', label: t.settings.tunStackMixed },
-      { value: 'system', label: t.settings.tunStackSystem },
     ],
     [t.settings],
   );
@@ -1270,7 +1149,7 @@ const handleImportConfig = useCallback(
                 <span className="setting-label">{t.settings.exportConfig}</span>
               </button>
               <button
-                onClick={handleOpenConfigEditor}
+                onClick={() => setShowConfigEditor(true)}
                 className="config-action-btn"
                 disabled={!activeConfigId}
               >
@@ -1385,16 +1264,6 @@ const handleImportConfig = useCallback(
                 <div className="toggle-knob" />
               </div>
             </div>
-            <button onClick={() => toggleSetting('enableTun')} className="panel-row">
-              <span className="setting-label">{t.settings.enableTun}</span>
-              <div
-                className={`toggle ${settings.enableTun ? 'on' : ''}`}
-                role="switch"
-                aria-checked={settings.enableTun}
-              >
-                <div className="toggle-knob" />
-              </div>
-            </button>
             <button onClick={() => toggleSetting('snowfall')} className="panel-row">
               <span className="setting-label">{t.settings.snowfall}</span>
               <div
@@ -1432,140 +1301,6 @@ const handleImportConfig = useCallback(
                   onClick={() => handleLanguageChange('be')}
                 >
                   Беларуская
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Advanced */}
-        <div>
-          <h3 className="section-heading">{t.settings.advanced}</h3>
-          <div className="panel">
-            <div className="panel-row disabled">
-              <span className="setting-label setting-label-with-help">
-                {t.settings.mtu}
-                <button
-                  type="button"
-                  className="help-tooltip"
-                  onClick={(e) => e.stopPropagation()}
-                  onMouseDown={(e) => e.stopPropagation()}
-                >
-                  <LuHelpCircle size={14} className="help-icon" />
-                  <span className="help-tooltip-content">{t.settings.mtuHelp}</span>
-                </button>
-              </span>
-              <input
-                type="text"
-                inputMode="numeric"
-                pattern="[0-9]*"
-                value={mtuDraft}
-                onChange={(e) => handleMtuDraftChange(e.target.value)}
-                onBlur={handleMtuBlur}
-                onKeyDown={handleMtuKeyDown}
-                className={`input ${mtuError ? 'input-error input-shake' : ''}`}
-                placeholder={`${MTU_MIN}–${MTU_MAX}`}
-              />
-            </div>
-            <div className="panel-row disabled">
-              <span className="setting-label setting-label-with-help">
-                {t.settings.tunStack}
-                <button
-                  type="button"
-                  className="help-tooltip"
-                  onClick={(e) => e.stopPropagation()}
-                  onMouseDown={(e) => e.stopPropagation()}
-                >
-                  <LuHelpCircle size={14} className="help-icon" />
-                  <span className="help-tooltip-content">{t.settings.tunStackHelp}</span>
-                </button>
-              </span>
-              <CustomSelect
-                value={settings.tunStack}
-                onChange={(value) => {
-                  setSettings((prev) => ({
-                    ...prev,
-                    tunStack: value as Settings['tunStack'],
-                  }));
-                  if (vpnEnabled) setNeedsRestart(true);
-                }}
-                options={tunStackOptions}
-              />
-            </div>
-            <div className="panel-row disabled" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '8px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span className="setting-label setting-label-with-help">
-                  {t.settings.fakeIpFilter}
-                  <button
-                    type="button"
-                    className="help-tooltip"
-                    onClick={(e) => e.stopPropagation()}
-                    onMouseDown={(e) => e.stopPropagation()}
-                  >
-                    <LuHelpCircle size={14} className="help-icon" />
-                    <span className="help-tooltip-content">{t.settings.fakeIpFilterHelp}</span>
-                  </button>
-                </span>
-              </div>
-              <div className="fake-ip-filter-list">
-                {settings.fakeIpFilter.map((filter, idx) => (
-                  <div key={idx} className="fake-ip-filter-item">
-                    <span className="fake-ip-filter-text">{filter}</span>
-                    <button
-                      type="button"
-                      className="fake-ip-filter-remove"
-                      onClick={() => {
-                        setSettings((prev) => ({
-                          ...prev,
-                          fakeIpFilter: prev.fakeIpFilter.filter((_, i) => i !== idx),
-                        }));
-                        if (vpnEnabled) setNeedsRestart(true);
-                      }}
-                      aria-label="Remove"
-                    >
-                      <LuX size={14} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-              <div className="fake-ip-filter-add-row">
-                <input
-                  type="text"
-                  className="input fake-ip-filter-input"
-                  value={fakeIpDraft}
-                  onChange={(e) => setFakeIpDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      const val = fakeIpDraft.trim();
-                      if (val && !settings.fakeIpFilter.includes(val)) {
-                        setSettings((prev) => ({
-                          ...prev,
-                          fakeIpFilter: [...prev.fakeIpFilter, val],
-                        }));
-                        setFakeIpDraft('');
-                        if (vpnEnabled) setNeedsRestart(true);
-                      }
-                    }
-                  }}
-                  placeholder={t.settings.fakeIpFilterPlaceholder}
-                />
-                <button
-                  type="button"
-                  className="btn btn-ghost-dark fake-ip-filter-add-btn"
-                  onClick={() => {
-                    const val = fakeIpDraft.trim();
-                    if (val && !settings.fakeIpFilter.includes(val)) {
-                      setSettings((prev) => ({
-                        ...prev,
-                        fakeIpFilter: [...prev.fakeIpFilter, val],
-                      }));
-                      setFakeIpDraft('');
-                      if (vpnEnabled) setNeedsRestart(true);
-                    }
-                  }}
-                >
-                  <LuPlus size={16} />
-                  <span>{t.settings.fakeIpFilterAdd}</span>
                 </button>
               </div>
             </div>
@@ -1665,60 +1400,15 @@ const handleImportConfig = useCallback(
         </div>
       </div>
 
-      {/* ─── Config Editor Modal ──────────────────────────────────────────── */}
-      {showConfigEditor && (
-        <div
-          className="modal-backdrop animate-fadeIn"
-          onClick={() => setShowConfigEditor(false)}
-          role="dialog"
-          aria-modal="true"
-        >
-          <div
-            className="modal config-editor-modal animate-scaleIn"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="modal-header">
-              <h3 className="modal-title">
-                {t.settings.editConfig || 'Edit Config'}
-                {' — '}
-                {configs.find((c) => c.id === activeConfigId)?.name || ''}
-              </h3>
-              <div className="modal-actions">
-                <button
-                  type="button"
-                  onClick={handleSaveConfigEditor}
-                  className="btn btn-icon"
-                  disabled={isSavingConfig}
-                  aria-label="Save"
-                  title="Save"
-                >
-                  <LuSave size={20} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowConfigEditor(false)}
-                  className="btn btn-icon"
-                  aria-label={t.common.close}
-                >
-                  <LuX size={20} />
-                </button>
-              </div>
-            </div>
-            <div className="modal-body config-editor-body">
-              {configEditorError && (
-                <div className="config-editor-error">{configEditorError}</div>
-              )}
-              <textarea
-                className="config-editor-textarea"
-                value={configEditorContent}
-                onChange={(e) => setConfigEditorContent(e.target.value)}
-                spellCheck={false}
-                autoFocus
-              />
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfigEditorModal
+        open={showConfigEditor}
+        onClose={() => setShowConfigEditor(false)}
+        configName={activeConfig?.name || ''}
+        filename={activeConfig?.filename || ''}
+        onSaved={handleConfigSaved}
+        vpnEnabled={vpnEnabled}
+        onNeedsRestart={() => setNeedsRestart(true)}
+      />
 
       {/* ─── Easter Egg Modal ─────────────────────────────────────────────── */}
       {showEasterEggModal && (

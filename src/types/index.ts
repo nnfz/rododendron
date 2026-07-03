@@ -30,11 +30,6 @@ export interface Settings {
   autoRestartOnRuleApply: boolean;
   closeBehavior: 'tray' | 'exit';
   killSwitch: boolean;
-  logLevel: string;
-  mtu: string;
-  enableTun: boolean;
-  tunStack: 'gvisor' | 'mixed' | 'system';
-  fakeIpFilter: string[];
   snowfall: boolean;
 }
 

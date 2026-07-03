@@ -323,8 +323,7 @@ export default function App() {
               try {
                 const { invoke } = await import('@tauri-apps/api/core');
                 const userRules = rulesToApply.map(r => ({ id: r.id, app: r.app, rule: r.rule, active: r.active, rule_type: r.ruleType || 'process' }));
-                const mtuValue = settings.mtu ? parseInt(settings.mtu, 10) : 1500;
-                const finalConfig = (await invoke('generate_config', { baseConfig: activeConfigContent, userRules, logLevel: settings.logLevel, enableTun: settings.enableTun, mtu: mtuValue, killSwitch: settings.killSwitch, tunStack: settings.tunStack, fakeIpFilter: settings.fakeIpFilter })) as string;
+                const finalConfig = (await invoke('generate_config', { baseConfig: activeConfigContent, userRules })) as string;
                 addLog('INFO', 'Applying rules without restart...');
                 await invoke('reload_mihomo_config', { configContent: finalConfig, configFilename: activeConfigFilename });
                 addLog('INFO', 'Rules applied');
@@ -337,7 +336,7 @@ export default function App() {
             addLog('INFO', 'Restarting VPN...');
             await stopVPN();
             await new Promise(resolve => setTimeout(resolve, 1000));
-            await startVPN(activeConfigContent, activeConfigFilename, rulesToApply, settings.logLevel, settings.enableTun, settings.mtu, settings.killSwitch, settings.tunStack, settings.fakeIpFilter);
+            await startVPN(activeConfigContent, activeConfigFilename, rulesToApply);
             setVpnRunningConfigId(activeConfigId || null);
             setRestartRequiredForConfig(false);
             addLog('INFO', 'VPN restarted');
@@ -360,7 +359,7 @@ export default function App() {
           if (!activeConfigContent || !activeConfigFilename) { addLog('ERROR', 'No active config selected for Start'); return; }
           try {
             addLog('INFO', 'Starting VPN (tray)...');
-            await startVPN(activeConfigContent, activeConfigFilename, rules, settings.logLevel, settings.enableTun, settings.mtu, settings.killSwitch, settings.tunStack, settings.fakeIpFilter);
+            await startVPN(activeConfigContent, activeConfigFilename, rules);
             setVpnRunningConfigId(activeConfigId || null);
             setRestartRequiredForConfig(false);
             setConnectedConfigSnapshot({ proxy_name: parsedConfig?.proxy_name ?? null, server_address: parsedConfig?.server_address ?? null, mixed_port: typeof parsedConfig?.mixed_port === 'number' ? parsedConfig.mixed_port : null });
@@ -474,7 +473,7 @@ export default function App() {
     } else {
       if (!activeConfigContent || !activeConfigFilename) { addLog('ERROR', 'No config selected or invalid config file'); return; }
       try {
-        await startVPN(activeConfigContent, activeConfigFilename, rules, settings.logLevel, settings.enableTun, settings.mtu, settings.killSwitch, settings.tunStack, settings.fakeIpFilter);
+        await startVPN(activeConfigContent, activeConfigFilename, rules);
         setVpnRunningConfigId(activeConfigId || null);
         setRestartRequiredForConfig(false);
         setConnectedConfigSnapshot({ proxy_name: parsedConfig?.proxy_name ?? null, server_address: parsedConfig?.server_address ?? null, mixed_port: typeof parsedConfig?.mixed_port === 'number' ? parsedConfig.mixed_port : null });
@@ -639,7 +638,7 @@ export default function App() {
       <LogsModal
         showLogsModal={showLogsModal} setShowLogsModal={setShowLogsModal}
         logs={showLogsModal ? logs : EMPTY_LOGS} setLogs={setLogs}
-        settings={settings} setSettings={setSettings} vpnEnabled={vpnEnabled}
+        vpnEnabled={vpnEnabled}
       />
     </div>
   );

@@ -119,6 +119,22 @@ export type Translations = {
     version: string;
     confirmDelete: string;
     versioncore: string;
+    configEditor: {
+      openFile: string;
+      loading: string;
+      addField: string;
+      noCustomFields: string;
+      fileNotFound: string;
+      sections: {
+        general: string;
+        tun: string;
+        dns: string;
+        profile: string;
+        performance: string;
+        custom: string;
+      };
+      fieldHelp: Record<string, string>;
+    };
   };
   logs: {
     title: string;
@@ -266,6 +282,28 @@ export const translations: Record<Language, Translations> = {
       about: 'About',
       version: 'Version',
       versioncore: 'Core version',
+      configEditor: {
+        openFile: 'Open file',
+        loading: 'Loading config...',
+        addField: 'Add parameter',
+        noCustomFields: 'No extra parameters. Add one if needed.',
+        fileNotFound: 'Config file not found on disk',
+        sections: {
+          general: 'General',
+          tun: 'TUN',
+          dns: 'DNS',
+          profile: 'Profile',
+          performance: 'Performance',
+          custom: 'Other parameters',
+        },
+        fieldHelp: {
+          'log-level': 'Mihomo log verbosity. Affects mihomo.log output.',
+          'tun.enable': 'Enable TUN mode. Requires admin on Linux/macOS.',
+          'tun.mtu': 'Maximum packet size. Lower if you have connection issues.',
+          'tun.stack': 'gvisor — userspace. mixed — TCP gvisor, UDP kernel. system — kernel only.',
+          'dns.fake-ip-filter': 'Domains that bypass Fake-IP. Add games, STUN and OS checks here.',
+        },
+      },
     },
     logs: {
       title: 'Application Logs',
@@ -412,6 +450,28 @@ export const translations: Record<Language, Translations> = {
       version: 'Версия',
       versioncore: 'Версия ядра',
       autoRestartOnRuleApply: 'Автоприменение правил',
+      configEditor: {
+        openFile: 'Открыть файл',
+        loading: 'Загрузка конфига...',
+        addField: 'Добавить параметр',
+        noCustomFields: 'Дополнительных параметров нет. Добавь, если нужно.',
+        fileNotFound: 'Файл конфига не найден на диске',
+        sections: {
+          general: 'Основное',
+          tun: 'TUN',
+          dns: 'DNS',
+          profile: 'Профиль',
+          performance: 'Производительность',
+          custom: 'Другие параметры',
+        },
+        fieldHelp: {
+          'log-level': 'Уровень логов mihomo. Влияет на mihomo.log.',
+          'tun.enable': 'Включить TUN. На Linux/macOS нужны права администратора.',
+          'tun.mtu': 'Макс. размер пакета. Уменьши при проблемах с подключением.',
+          'tun.stack': 'gvisor — юзерспейс. mixed — TCP gvisor, UDP ядро. system — только ядро.',
+          'dns.fake-ip-filter': 'Домены в обход Fake-IP. Игры, STUN и проверки ОС — сюда.',
+        },
+      },
     },
     logs: {
       title: 'Логи',
@@ -557,6 +617,28 @@ export const translations: Record<Language, Translations> = {
       about: 'Пра праграму',
       version: 'Версія',
       versioncore: 'Версія ядра',
+      configEditor: {
+        openFile: 'Адкрыць файл',
+        loading: 'Загрузка канфіга...',
+        addField: 'Дадаць параметр',
+        noCustomFields: 'Дадатковых параметраў няма. Дадай, калі трэба.',
+        fileNotFound: 'Файл канфіга не знойдзены на дыску',
+        sections: {
+          general: 'Асноўнае',
+          tun: 'TUN',
+          dns: 'DNS',
+          profile: 'Профіль',
+          performance: 'Прадукцыйнасць',
+          custom: 'Іншыя параметры',
+        },
+        fieldHelp: {
+          'log-level': 'Узровень логаў mihomo. Уплывае на mihomo.log.',
+          'tun.enable': 'Уключыць TUN. На Linux/macOS патрэбныя правы адміністратара.',
+          'tun.mtu': 'Макс. памер пакета. Паменшы пры праблемах з падключэннем.',
+          'tun.stack': 'gvisor — юзерспейс. mixed — TCP gvisor, UDP ядро. system — толькі ядро.',
+          'dns.fake-ip-filter': 'Дамены ў абыход Fake-IP. Гульні, STUN і праверкі ОС — сюды.',
+        },
+      },
     },
     logs: {
       title: 'Логі праграмы',

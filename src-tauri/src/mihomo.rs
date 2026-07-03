@@ -1203,6 +1203,20 @@ pub fn resolve_config_path(app: AppHandle, filename: String) -> Result<Option<St
 }
 
 #[tauri::command(rename_all = "camelCase")]
+pub fn parse_config_yaml(content: String) -> Result<serde_json::Value, String> {
+    let yaml: serde_yaml::Value = serde_yaml::from_str(&content)
+        .map_err(|e| format!("Failed to parse YAML: {}", e))?;
+    serde_json::to_value(yaml).map_err(|e| format!("Failed to convert YAML: {}", e))
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn stringify_config_yaml(value: serde_json::Value) -> Result<String, String> {
+    let yaml: serde_yaml::Value =
+        serde_json::from_value(value).map_err(|e| format!("Failed to convert JSON: {}", e))?;
+    serde_yaml::to_string(&yaml).map_err(|e| format!("Failed to serialize YAML: {}", e))
+}
+
+#[tauri::command(rename_all = "camelCase")]
 pub fn parse_config(config_content: String) -> Result<ParsedConfig, String> {
     let yaml: serde_yaml::Value = serde_yaml::from_str(&config_content)
         .map_err(|e| format!("Failed to parse YAML: {}", e))?;
@@ -1277,148 +1291,29 @@ pub fn parse_config(config_content: String) -> Result<ParsedConfig, String> {
     })
 }
 
+#[cfg(not(target_os = "windows"))]
+fn config_tun_enabled(config_content: &str) -> bool {
+    serde_yaml::from_str::<serde_yaml::Value>(config_content)
+        .ok()
+        .and_then(|yaml| yaml.get("tun").and_then(|tun| tun.get("enable")).and_then(|v| v.as_bool()))
+        .unwrap_or(true)
+}
+
 #[tauri::command(rename_all = "camelCase")]
 pub fn generate_config(
     base_config: String,
     user_rules: Vec<UserRule>,
-    log_level: String,
-    enable_tun: bool,
-    mtu: Option<u32>,
-    kill_switch: bool,
-    tun_stack: Option<String>,
-    fake_ip_filter: Option<Vec<String>>,
 ) -> Result<String, String> {
-    let _ = kill_switch;
     let mut yaml: serde_yaml::Value = serde_yaml::from_str(&base_config)
         .map_err(|e| format!("Failed to parse YAML: {}", e))?;
-
-    yaml["log-level"] = serde_yaml::Value::String(log_level.to_lowercase());
 
     if yaml.get("external-controller").is_none() {
         yaml["external-controller"] = serde_yaml::Value::String("127.0.0.1:9090".to_string());
     }
 
-    let mut profile = serde_yaml::Mapping::new();
-    profile.insert("store-fake-ip".into(), serde_yaml::Value::Bool(true));
-    profile.insert("store-selected".into(), serde_yaml::Value::Bool(true));
-    yaml["profile"] = serde_yaml::Value::Mapping(profile);
-
     if !user_rules.is_empty() {
         yaml["rules"] = serde_yaml::Value::Sequence(build_rules_from_user_rules(&user_rules));
     }
-
-    // TUN
-    let mut tun = serde_yaml::Mapping::new();
-    tun.insert("enable".into(), serde_yaml::Value::Bool(enable_tun));
-    if let Some(mtu) = mtu {
-        tun.insert(
-            "mtu".into(),
-            serde_yaml::Value::Number(serde_yaml::Number::from(mtu)),
-        );
-    }
-    tun.insert(
-        "auto-detect-interface".into(),
-        serde_yaml::Value::Bool(true),
-    );
-    let stack_value = tun_stack
-        .as_deref()
-        .unwrap_or("gvisor")
-        .to_string();
-    tun.insert("stack".into(), serde_yaml::Value::String(stack_value));
-    tun.insert("auto-route".into(), serde_yaml::Value::Bool(true));
-    tun.insert(
-        "device".into(),
-        serde_yaml::Value::String("Mihomo".to_string()),
-    );
-    tun.insert(
-        "dns-hijack".into(),
-        serde_yaml::Value::Sequence(vec![serde_yaml::Value::String("any:53".to_string())]),
-    );
-    tun.insert(
-        "endpoint-independent-nat".into(),
-        serde_yaml::Value::Bool(true),
-    );
-    yaml["tun"] = serde_yaml::Value::Mapping(tun);
-
-    // DNS
-    let mut dns = serde_yaml::Mapping::new();
-    dns.insert("enable".into(), serde_yaml::Value::Bool(true));
-    dns.insert("ipv6".into(), serde_yaml::Value::Bool(true));
-    dns.insert(
-        "enhanced-mode".into(),
-        serde_yaml::Value::String("fake-ip".to_string()),
-    );
-    dns.insert(
-        "fake-ip-range".into(),
-        serde_yaml::Value::String("198.18.0.1/16".to_string()),
-    );
-    dns.insert(
-        "default-nameserver".into(),
-        serde_yaml::Value::Sequence(vec![
-            serde_yaml::Value::String("1.1.1.1".to_string()),
-            serde_yaml::Value::String("8.8.8.8".to_string()),
-        ]),
-    );
-    dns.insert(
-        "nameserver".into(),
-        serde_yaml::Value::Sequence(vec![
-            serde_yaml::Value::String("https://1.1.1.1/dns-query".to_string()),
-            serde_yaml::Value::String("https://8.8.8.8/dns-query".to_string()),
-        ]),
-    );
-    dns.insert(
-        "proxy-server-nameserver".into(),
-        serde_yaml::Value::Sequence(vec![
-            serde_yaml::Value::String("https://1.1.1.1/dns-query".to_string()),
-            serde_yaml::Value::String("https://8.8.8.8/dns-query".to_string()),
-        ]),
-    );
-    dns.insert(
-        "fallback".into(),
-        serde_yaml::Value::Sequence(vec![serde_yaml::Value::String(
-            "https://dns.google/dns-query".to_string(),
-        )]),
-    );
-
-    let mut fallback_filter = serde_yaml::Mapping::new();
-    fallback_filter.insert("geoip".into(), serde_yaml::Value::Bool(true));
-    fallback_filter.insert(
-        "geoip-code".into(),
-        serde_yaml::Value::String("RU".to_string()),
-    );
-    dns.insert(
-        "fallback-filter".into(),
-        serde_yaml::Value::Mapping(fallback_filter),
-    );
-
-    let mut cache = serde_yaml::Mapping::new();
-    cache.insert(
-        "size".into(),
-        serde_yaml::Value::Number(serde_yaml::Number::from(4096)),
-    );
-    cache.insert(
-        "min-ttl".into(),
-        serde_yaml::Value::Number(serde_yaml::Number::from(600)),
-    );
-    dns.insert("cache".into(), serde_yaml::Value::Mapping(cache));
-
-    {
-        let default_filters = vec!["*.lan".to_string(), "*.local".to_string()];
-        let filters = fake_ip_filter.unwrap_or(default_filters);
-        let filter_values: Vec<serde_yaml::Value> = filters
-            .into_iter()
-            .map(serde_yaml::Value::String)
-            .collect();
-        dns.insert(
-            "fake-ip-filter".into(),
-            serde_yaml::Value::Sequence(filter_values),
-        );
-    }
-
-    yaml["dns"] = serde_yaml::Value::Mapping(dns);
-    yaml["tcp-concurrent"] = serde_yaml::Value::Bool(true);
-    yaml["unified-delay"] = serde_yaml::Value::Bool(true);
-    yaml["keep-alive-interval"] = serde_yaml::Value::Number(serde_yaml::Number::from(30));
 
     serde_yaml::to_string(&yaml).map_err(|e| format!("Failed to serialize YAML: {}", e))
 }
@@ -1429,10 +1324,12 @@ pub async fn import_config(
     config_content: String,
     filename: String,
 ) -> Result<String, String> {
-    let config_dir = primary_config_dir(&app);
-    fs::create_dir_all(&config_dir)
-        .map_err(|e| format!("Failed to create config dir: {}", e))?;
-    let config_path = config_dir.join(&filename);
+    let config_path = find_existing_config_path(&app, &filename)
+        .unwrap_or_else(|| primary_config_dir(&app).join(&filename));
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create config dir: {}", e))?;
+    }
 
     let content_to_write = match serde_yaml::from_str::<serde_yaml::Value>(&config_content) {
         Ok(mut yaml) => {
@@ -1556,16 +1453,10 @@ pub async fn start_vpn(
     app: AppHandle,
     config_content: String,
     config_filename: String,
-    enable_tun: bool,
 ) -> Result<VpnStatus, String> {
-    #[cfg(target_os = "windows")]
-    {
-        let _ = enable_tun;
-    }
-
     #[cfg(not(target_os = "windows"))]
     {
-        if enable_tun && !has_admin_privileges() {
+        if config_tun_enabled(&config_content) && !has_admin_privileges() {
             return Err(
                 "TUN requires elevated privileges. Disable TUN or run with sudo/root.".to_string(),
             );

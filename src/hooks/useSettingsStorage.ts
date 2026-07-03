@@ -12,18 +12,6 @@ const DEFAULT_SETTINGS: Settings = {
   autoRestartOnRuleApply: true,
   closeBehavior: 'tray',
   killSwitch: false,
-  logLevel: 'info',
-  mtu: '1500',
-  enableTun: true,
-  tunStack: 'gvisor',
-  fakeIpFilter: [
-    '*.lan',
-    '*.local',
-    'stun.*.*',
-    'stun.*.*.*',
-    '+.msftncsi.com',
-    '+.msftconnecttest.com',
-  ],
   snowfall: false,
 };
 

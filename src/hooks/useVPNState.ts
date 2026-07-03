@@ -6,12 +6,6 @@ type StartVPNFn = (
   configContent: string,
   configFilename: string,
   rules: Rule[],
-  logLevel: string,
-  enableTun?: boolean,
-  mtu?: string,
-  killSwitch?: boolean,
-  tunStack?: string,
-  fakeIpFilter?: string[]
 ) => Promise<void>;
 
 type StopVPNFn = () => Promise<void>;
@@ -20,12 +14,6 @@ type ToggleVPNFn = (
   configContent?: string,
   configFilename?: string,
   rules?: Rule[],
-  logLevel?: string,
-  enableTun?: boolean,
-  mtu?: string,
-  killSwitch?: boolean,
-  tunStack?: string,
-  fakeIpFilter?: string[]
 ) => Promise<void>;
 
 export interface VPNState {
@@ -60,15 +48,9 @@ export function useVPNState(): VPNState {
   }, []);
 
   const startVPN: StartVPNFn = useCallback(async (
-    configContent: string, 
-    configFilename: string, 
-    rules: Rule[], 
-    logLevel: string, 
-    enableTun: boolean = true,
-    mtu?: string,
-    killSwitch: boolean = false,
-    tunStack?: string,
-    fakeIpFilter?: string[]
+    configContent: string,
+    configFilename: string,
+    rules: Rule[],
   ) => {
     if (!isTauri()) {
       setVpnEnabled(true);
@@ -89,24 +71,14 @@ export function useVPNState(): VPNState {
         rule_type: r.ruleType || 'process',
       }));
 
-      // Парсим MTU в число
-      const mtuValue = mtu ? parseInt(mtu, 10) : 1500;
-
       const finalConfig = await invoke('generate_config', {
         baseConfig: configContent,
         userRules,
-        logLevel,
-        enableTun,
-        mtu: mtuValue,
-        killSwitch,
-        tunStack: tunStack || null,
-        fakeIpFilter: fakeIpFilter || null,
       }) as string;
 
       const status = await invoke('start_vpn', {
         configContent: finalConfig,
         configFilename,
-        enableTun,
       }) as VpnStatus;
 
       await new Promise(resolve => setTimeout(resolve, 1200));
@@ -118,7 +90,7 @@ export function useVPNState(): VPNState {
         setVpnEnabled(status.running);
         setVpnStatus(status);
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
       const errMsg = e instanceof Error ? e.message : String(e);
       setError(errMsg);
       console.error('Failed to start VPN:', e);
@@ -146,20 +118,14 @@ export function useVPNState(): VPNState {
   }, []);
 
   const toggleVPN: ToggleVPNFn = useCallback(async (
-    configContent?: string, 
-    configFilename?: string, 
-    rules?: Rule[], 
-    logLevel?: string,
-    enableTun?: boolean,
-    mtu?: string,
-    killSwitch?: boolean,
-    tunStack?: string,
-    fakeIpFilter?: string[]
+    configContent?: string,
+    configFilename?: string,
+    rules?: Rule[],
   ) => {
     if (vpnEnabled) {
       await stopVPN();
-    } else if (configContent && configFilename && rules && logLevel !== undefined) {
-      await startVPN(configContent, configFilename, rules, logLevel, enableTun, mtu, killSwitch, tunStack, fakeIpFilter);
+    } else if (configContent && configFilename && rules) {
+      await startVPN(configContent, configFilename, rules);
     }
   }, [vpnEnabled, startVPN, stopVPN]);
 
