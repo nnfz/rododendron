@@ -1,4 +1,8 @@
+mod api_cache;
+mod errors;
+mod metrics;
 mod mihomo;
+mod optimizations;
 mod process_scanner;
 mod updater;
 mod task_scheduler;
@@ -18,6 +22,7 @@ use mihomo::{
     // === НОВЫЕ КОМАНДЫ Network ===
     get_network_interfaces,
 };
+use metrics::get_vpn_metrics;
 use process_scanner::get_running_processes;
 use updater::{check_for_updates, install_update};
 use task_scheduler::{
@@ -39,6 +44,9 @@ use image::codecs::png::PngEncoder;
 use image::ColorType;
 use image::ImageEncoder;
 use image::Rgba;
+use tracing::info;
+use tracing_appender::rolling::{RollingFileAppender, Rotation};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use std::sync::{LazyLock, Mutex};
 
@@ -141,6 +149,27 @@ pub fn run() {
                 .build(),
         )
         .setup(|app| {
+            // ── Инициализация логирования ──
+            let config_dir = app.path()
+                .app_config_dir()
+                .or_else(|_| app.path().app_local_data_dir())
+                .unwrap_or_else(|_| std::env::temp_dir().join("Rododendron"));
+
+            let log_dir = config_dir.join("logs");
+            let _ = std::fs::create_dir_all(&log_dir);
+
+            let file_appender = RollingFileAppender::new(Rotation::DAILY, log_dir, "rododendron.log");
+
+            tracing_subscriber::registry()
+                .with(
+                    tracing_subscriber::EnvFilter::try_from_default_env()
+                        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"))
+                )
+                .with(tracing_subscriber::fmt::layer().with_writer(file_appender))
+                .init();
+
+            info!("Rododendron starting up");
+
             // ── Проверяем и убиваем осиротевшие процессы при старте ──
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -214,6 +243,7 @@ pub fn run() {
                         }
                     }
                     "tray_quit" => {
+                        info!("Quit requested from tray");
                         cleanup_mihomo();
                         app.exit(0);
                     }
@@ -235,6 +265,7 @@ pub fn run() {
 
                 match behavior {
                     CloseBehavior::Exit => {
+                        info!("Exit requested from close button");
                         cleanup_mihomo();
                         app.exit(0);
                     }
@@ -283,6 +314,8 @@ pub fn run() {
             get_mihomo_binary_name,
             health_check,
             get_network_interfaces,
+            // ── Metrics ──
+            get_vpn_metrics,
             // ── UI ──
             set_tray_vpn_enabled,
             set_close_behavior,
@@ -303,6 +336,7 @@ pub fn run() {
         .expect("error building tauri application")
         .run(|_app_handle, event| match event {
             RunEvent::Exit => {
+                info!("Application exiting");
                 cleanup_mihomo();
             }
             RunEvent::ExitRequested { api, .. } => {

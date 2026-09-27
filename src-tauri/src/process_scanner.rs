@@ -241,16 +241,29 @@ pub fn get_running_processes() -> Vec<ProcessInfo> {
         };
 
         unsafe {
-            let mut pids: [u32; 4096] = [0; 4096];
+            // Динамический размер буфера
+            let mut pids: Vec<u32> = vec![0; 1024];
             let mut bytes_returned: u32 = 0;
 
-            if EnumProcesses(
-                pids.as_mut_ptr(),
-                mem::size_of_val(&pids) as u32,
-                &mut bytes_returned,
-            ) == 0
-            {
-                return vec![];
+            loop {
+                let buffer_size = (pids.len() * mem::size_of::<u32>()) as u32;
+
+                if EnumProcesses(
+                    pids.as_mut_ptr(),
+                    buffer_size,
+                    &mut bytes_returned,
+                ) == 0
+                {
+                    return vec![];
+                }
+
+                // Если буфер заполнен менее чем на 90%, размер достаточен
+                if bytes_returned < (buffer_size as f32 * 0.9) as u32 {
+                    break;
+                }
+
+                // Увеличиваем буфер
+                pids.resize(pids.len() * 2, 0);
             }
 
             let num_processes = (bytes_returned as usize) / mem::size_of::<u32>();

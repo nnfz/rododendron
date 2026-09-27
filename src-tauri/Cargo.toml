@@ -28,6 +28,11 @@ urlencoding = "2"
 base64 = "0.22"
 chrono = "0.4"
 nix = { version = "0.27", features = ["user"] }
+thiserror = "2.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+tokio = { version = "1", features = ["sync", "time", "macros"] }
 
 [target.'cfg(windows)'.dependencies]
 window-vibrancy = "0.6"

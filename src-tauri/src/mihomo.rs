@@ -8,7 +8,10 @@ use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::thread;
+use std::time::Duration;
 use tauri::{AppHandle, Manager};
+use tokio::sync::Notify;
+use tracing::{debug, error, info, warn};
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -38,11 +41,16 @@ static CONTROLLER_CONFIG: LazyLock<Mutex<ControllerConfig>> = LazyLock::new(|| {
 static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
     reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
+        .tcp_keepalive(Some(std::time::Duration::from_secs(30)))
+        .pool_idle_timeout(Some(std::time::Duration::from_secs(90)))
         .build()
         .unwrap_or_else(|_| reqwest::Client::new())
 });
 
 static START_TIME: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+
+static MIHOMO_READY: LazyLock<Arc<(Mutex<bool>, Notify)>> =
+    LazyLock::new(|| Arc::new((Mutex::new(false), Notify::new())));
 
 // ─── Внутренние типы ─────────────────────────────────────────────────────────
 
@@ -462,7 +470,7 @@ async fn mihomo_get_json<T: for<'de> Deserialize<'de>>(paths: &[&str]) -> Result
     resp.json::<T>().await.map_err(|e| e.to_string())
 }
 
-async fn mihomo_get_json_value(paths: &[&str]) -> Result<serde_json::Value, String> {
+pub(crate) async fn mihomo_get_json_value(paths: &[&str]) -> Result<serde_json::Value, String> {
     let resp = mihomo_request(reqwest::Method::GET, paths, None).await?;
     let body = resp.text().await.map_err(|e| e.to_string())?;
 
@@ -532,43 +540,94 @@ fn format_error_with_log(base_msg: &str, app: &AppHandle) -> String {
     }
 }
 
-/// Ожидание готовности mihomo после запуска
+/// Ожидание готовности mihomo после запуска (с уведомлением вместо polling)
 async fn wait_for_mihomo_ready(app: &AppHandle) -> Result<(), String> {
-    let start = std::time::Instant::now();
-    let timeout = std::time::Duration::from_secs(MIHOMO_READY_TIMEOUT_SECS);
-    let delay = std::time::Duration::from_millis(300);
+    let ready_pair = Arc::clone(&MIHOMO_READY);
+    let (lock, notify) = &*ready_pair;
 
-    loop {
-        // Проверяем, не умер ли процесс раньше времени
-        {
-            if let Ok(mut guard) = MIHOMO_PROCESS.lock() {
-                if let Some(ref mut child) = *guard {
-                    if let Ok(Some(status)) = child.try_wait() {
-                        let _ = guard.take();
-                        // Даём логу записаться
-                        std::thread::sleep(std::time::Duration::from_millis(200));
-                        let msg = format!("Mihomo exited with status: {}", status);
-                        return Err(format_error_with_log(&msg, app));
+    // Сбрасываем состояние готовности
+    {
+        let mut ready = lock.lock().map_err(|e| e.to_string())?;
+        *ready = false;
+    }
+
+    // Запускаем проверку в отдельном потоке
+    let _app_clone = app.clone();
+    let ready_pair_clone = Arc::clone(&ready_pair);
+
+    tokio::spawn(async move {
+        let delay = Duration::from_millis(200);
+        let max_attempts = (MIHOMO_READY_TIMEOUT_SECS * 1000 / 200) as usize;
+
+        for attempt in 0..max_attempts {
+            // Проверяем, не умер ли процесс
+            {
+                if let Ok(mut guard) = MIHOMO_PROCESS.lock() {
+                    if let Some(ref mut child) = *guard {
+                        if let Ok(Some(status)) = child.try_wait() {
+                            error!("Mihomo exited prematurely with status: {}", status);
+                            return;
+                        }
                     }
                 }
             }
+
+            // Проверяем готовность API
+            if mihomo_get_json_value(&["/configs"]).await.is_ok() {
+                debug!("Mihomo ready after {} attempts", attempt + 1);
+                let (lock, notify) = &*ready_pair_clone;
+                if let Ok(mut ready) = lock.lock() {
+                    *ready = true;
+                    notify.notify_waiters();
+                }
+                return;
+            }
+
+            tokio::time::sleep(delay).await;
         }
 
-        // Проверяем готовность API
-        if mihomo_get_json_value(&["/configs"]).await.is_ok() {
-            return Ok(());
+        warn!("Mihomo readiness check timed out");
+    });
+
+    // Ждём с таймаутом
+    let timeout = tokio::time::sleep(Duration::from_secs(MIHOMO_READY_TIMEOUT_SECS));
+    tokio::pin!(timeout);
+
+    loop {
+        // Проверяем состояние
+        {
+            let ready = lock.lock().map_err(|e| e.to_string())?;
+            if *ready {
+                info!("Mihomo is ready and responsive");
+                return Ok(());
+            }
         }
 
-        // Проверяем таймаут
-        if start.elapsed() >= timeout {
-            return Err(format_error_with_log(
-                "Mihomo did not become ready in time",
-                app,
-            ));
+        // Ждём уведомления или таймаута
+        tokio::select! {
+            _ = notify.notified() => {
+                // Получили уведомление, проверим снова на следующей итерации
+                continue;
+            }
+            _ = &mut timeout => {
+                // Таймаут истёк
+                break;
+            }
         }
-
-        std::thread::sleep(delay);
     }
+
+    // Проверяем процесс один последний раз
+    if let Ok(mut guard) = MIHOMO_PROCESS.lock() {
+        if let Some(ref mut child) = *guard {
+            if let Ok(Some(status)) = child.try_wait() {
+                let _ = guard.take();
+                std::thread::sleep(Duration::from_millis(200));
+                let msg = format!("Mihomo exited with status: {}", status);
+                return Err(format_error_with_log(&msg, app));
+            }
+        }
+    }
+    Err(format_error_with_log("Mihomo did not become ready in time", app))
 }
 
 // ─── Ping ────────────────────────────────────────────────────────────────────
@@ -1014,6 +1073,7 @@ pub fn get_network_interfaces() -> Result<Vec<NetworkInterface>, String> {
 
 /// Парсит AmneziaWG / WireGuard .conf файл и возвращает YAML для proxy entry в Mihomo формате.
 /// Добавляет persistent-keepalive: 25 по умолчанию (решает проблему обрыва соединения).
+/// Использует оптимальный MTU из сети.
 #[allow(dead_code)]
 fn parse_amnezia_wg_conf(content: &str) -> Result<serde_yaml::Value, String> {
     let mut interface: HashMap<String, String> = HashMap::new();
@@ -1152,15 +1212,28 @@ fn parse_amnezia_wg_conf(content: &str) -> Result<serde_yaml::Value, String> {
             serde_yaml::Value::Mapping(amnezia),
         );
 
+        // Оптимальный MTU для AmneziaWG
         if proxy.get("mtu").is_none() {
+            let optimal_mtu = crate::optimizations::detect_optimal_mtu();
+            // AmneziaWG может требовать ещё меньший MTU
+            let amnezia_mtu = optimal_mtu.min(1280);
             proxy.insert(
                 "mtu".into(),
-                serde_yaml::Value::Number(serde_yaml::Number::from(1280u64)),
+                serde_yaml::Value::Number(serde_yaml::Number::from(amnezia_mtu as u64)),
             );
         }
 
         if proxy.get("remote-dns-resolve").is_none() {
             proxy.insert("remote-dns-resolve".into(), serde_yaml::Value::Bool(true));
+        }
+    } else {
+        // Обычный WireGuard - используем оптимальный MTU
+        if proxy.get("mtu").is_none() {
+            let optimal_mtu = crate::optimizations::detect_optimal_mtu();
+            proxy.insert(
+                "mtu".into(),
+                serde_yaml::Value::Number(serde_yaml::Number::from(optimal_mtu as u64)),
+            );
         }
     }
 
@@ -1265,32 +1338,11 @@ pub fn import_amnezia_wg_as_config(
     );
 
     // Минимальный DNS (можно потом перегенерировать через generate_config)
-    let mut dns = serde_yaml::Mapping::new();
-    dns.insert("enable".into(), serde_yaml::Value::Bool(true));
-    dns.insert("ipv6".into(), serde_yaml::Value::Bool(true));
-    dns.insert(
-        "enhanced-mode".into(),
-        serde_yaml::Value::String("fake-ip".to_string()),
-    );
-    dns.insert(
-        "fake-ip-range".into(),
-        serde_yaml::Value::String("198.18.0.1/16".to_string()),
-    );
-    dns.insert(
-        "default-nameserver".into(),
-        serde_yaml::Value::Sequence(vec![
-            serde_yaml::Value::String("1.1.1.1".to_string()),
-            serde_yaml::Value::String("8.8.8.8".to_string()),
-        ]),
-    );
-    dns.insert(
-        "nameserver".into(),
-        serde_yaml::Value::Sequence(vec![
-            serde_yaml::Value::String("https://1.1.1.1/dns-query".to_string()),
-            serde_yaml::Value::String("https://8.8.8.8/dns-query".to_string()),
-        ]),
-    );
+    let dns = crate::optimizations::build_optimized_dns_config();
     root.insert("dns".into(), serde_yaml::Value::Mapping(dns));
+
+    // Добавляем dialer оптимизации
+    crate::optimizations::add_dialer_optimizations(&mut root);
 
     // TUN выключен по умолчанию (включай вручную если нужно)
     let mut tun = serde_yaml::Mapping::new();
@@ -1320,7 +1372,9 @@ pub async fn mihomo_get_traffic() -> Result<MihomoTraffic, String> {
 
 #[tauri::command]
 pub async fn mihomo_get_proxies() -> Result<serde_json::Value, String> {
-    mihomo_get_json_value(&["/v1/proxies", "/proxies"]).await
+    crate::api_cache::get_proxies_cached(
+        mihomo_get_json_value(&["/v1/proxies", "/proxies"])
+    ).await
 }
 
 #[tauri::command]
@@ -1721,6 +1775,11 @@ pub async fn start_vpn(
 
     rotate_log_file(&log_path);
 
+    // Применяем TCP оптимизации
+    if let Err(e) = crate::optimizations::optimize_tcp_stack() {
+        warn!("Failed to apply TCP optimizations: {}", e);
+    }
+
     // Убиваем старые процессы
     {
         let mut process_guard = MIHOMO_PROCESS.lock().map_err(|e| e.to_string())?;
@@ -1769,9 +1828,13 @@ pub async fn start_vpn(
     save_pid(&app, pid);
 
     // Запоминаем время старта
-    if let Ok(mut guard) = START_TIME.lock() {
+    {
+        let mut guard = START_TIME.lock().map_err(|e| e.to_string())?;
         *guard = Some(std::time::Instant::now());
     }
+
+    // Отмечаем старт в metrics
+    crate::metrics::mark_vpn_started();
 
     update_controller_config(&config_content);
 
@@ -1868,12 +1931,21 @@ pub async fn stop_vpn(app: AppHandle) -> Result<VpnStatus, String> {
     }
 
     // Сбрасываем время старта
-    if let Ok(mut guard) = START_TIME.lock() {
+    {
+        let mut guard = START_TIME.lock().map_err(|e| e.to_string())?;
         *guard = None;
     }
 
+    // Отмечаем остановку в metrics
+    crate::metrics::mark_vpn_stopped();
+
+    // Очищаем кеш API
+    crate::api_cache::clear_cache();
+
     kill_existing_mihomo();
     clear_pid(&app);
+
+    info!("VPN stopped successfully");
 
     Ok(VpnStatus {
         running: false,
