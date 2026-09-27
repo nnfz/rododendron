@@ -780,7 +780,7 @@ select.input option {
   right: 0;
   background: var(--sidebg);
   border: 1px solid var(--border);
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(12px);
   border-radius: 0.5rem;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
   z-index: 1000;
@@ -2741,6 +2741,76 @@ select.input option {
   color: #f44;
   font-size: 13px;
   border-bottom: 1px solid rgba(255, 68, 68, 0.3);
+}
+
+.nameserver-policy-panel {
+  margin-top: 10px;
+}
+
+.nameserver-policy-head {
+  padding: 12px 14px 0;
+}
+
+.nameserver-policy-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding-bottom: 12px;
+}
+
+.nameserver-policy-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 32px;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.nameserver-policy-row:last-of-type {
+  border-bottom: none;
+}
+
+.nameserver-policy-row-head {
+  padding-top: 4px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.nameserver-policy-col-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  opacity: 0.55;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.nameserver-policy-row .input {
+  width: 100%;
+  text-align: left;
+}
+
+.nameserver-policy-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.nameserver-policy-remove:hover {
+  background: rgba(255, 68, 68, 0.12);
+  color: #f66;
+}
+
+.nameserver-policy-add {
+  margin: 10px 14px 0;
+  align-self: flex-start;
 }
 
 /* ─── Fake-IP Filter ──────────────────────────────────────────────────────── */

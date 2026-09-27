@@ -9,6 +9,7 @@ export interface ConfigFieldDef {
   section: ConfigFieldSection;
   type: ConfigFieldType;
   options?: string[];
+  listPlaceholder?: string;
 }
 
 export interface ConfigFieldState {
@@ -16,13 +17,21 @@ export interface ConfigFieldState {
   section: ConfigFieldSection;
   type: ConfigFieldType;
   options?: string[];
+  listPlaceholder?: string;
   value: string | boolean | string[];
   custom?: boolean;
+}
+
+export interface NameserverPolicyEntry {
+  id: string;
+  pattern: string;
+  server: string;
 }
 
 export interface ConfigEditorState {
   fields: ConfigFieldState[];
   customFields: ConfigFieldState[];
+  nameserverPolicy: NameserverPolicyEntry[];
 }
 
 const RESERVED_TOP_LEVEL = new Set([
@@ -59,7 +68,13 @@ export const CONFIG_FIELD_DEFS: ConfigFieldDef[] = [
   { path: 'dns.ipv6', section: 'dns', type: 'boolean' },
   { path: 'dns.enhanced-mode', section: 'dns', type: 'select', options: ['fake-ip', 'redir-host'] },
   { path: 'dns.fake-ip-range', section: 'dns', type: 'string' },
-  { path: 'dns.fake-ip-filter', section: 'dns', type: 'string-list' },
+  { path: 'dns.fake-ip-filter', section: 'dns', type: 'string-list', listPlaceholder: '*.example.com' },
+  { path: 'dns.default-nameserver', section: 'dns', type: 'string-list', listPlaceholder: '1.1.1.1' },
+  { path: 'dns.nameserver', section: 'dns', type: 'string-list', listPlaceholder: 'https://1.1.1.1/dns-query' },
+  { path: 'dns.proxy-server-nameserver', section: 'dns', type: 'string-list', listPlaceholder: 'https://1.1.1.1/dns-query' },
+  { path: 'dns.fallback', section: 'dns', type: 'string-list', listPlaceholder: 'https://dns.google/dns-query' },
+  { path: 'dns.fallback-filter.geoip', section: 'dns', type: 'boolean' },
+  { path: 'dns.fallback-filter.geoip-code', section: 'dns', type: 'string' },
   { path: 'dns.use-hosts', section: 'dns', type: 'boolean' },
   { path: 'dns.respect-rules', section: 'dns', type: 'boolean' },
   { path: 'profile.store-selected', section: 'profile', type: 'boolean' },
@@ -166,6 +181,7 @@ export async function parseConfigEditorState(content: string): Promise<ConfigEdi
     section: def.section,
     type: def.type,
     options: def.options,
+    listPlaceholder: def.listPlaceholder,
     value: scalarToFieldValue(def.type, getByPath(root, def.path)),
   }));
 
@@ -185,7 +201,68 @@ export async function parseConfigEditorState(content: string): Promise<ConfigEdi
 
   customFields.sort((a, b) => a.path.localeCompare(b.path));
 
-  return { fields, customFields };
+  const nameserverPolicy = parseNameserverPolicy(getByPath(root, 'dns.nameserver-policy'));
+
+  return { fields, customFields, nameserverPolicy };
+}
+
+function parseNameserverPolicy(raw: unknown): NameserverPolicyEntry[] {
+  if (!isRecord(raw)) return [];
+
+  const entries: NameserverPolicyEntry[] = [];
+  let idx = 0;
+  for (const [pattern, value] of Object.entries(raw)) {
+    let server = '';
+    if (typeof value === 'string') {
+      server = value.trim();
+    } else if (Array.isArray(value)) {
+      server = value.map((item) => String(item).trim()).filter(Boolean)[0] ?? '';
+    } else if (typeof value === 'number' || typeof value === 'boolean') {
+      server = String(value);
+    }
+
+    entries.push({
+      id: `policy-${idx}`,
+      pattern,
+      server,
+    });
+    idx += 1;
+  }
+
+  entries.sort((a, b) => a.pattern.localeCompare(b.pattern));
+  return entries;
+}
+
+function applyNameserverPolicy(root: Record<string, unknown>, entries: NameserverPolicyEntry[]): void {
+  const policy: Record<string, string> = {};
+
+  for (const entry of entries) {
+    const pattern = entry.pattern.trim();
+    const server = entry.server.trim();
+    if (!pattern || !server) continue;
+    policy[pattern] = server;
+  }
+
+  if (Object.keys(policy).length === 0) {
+    const dns = getByPath(root, 'dns');
+    if (isRecord(dns)) {
+      delete dns['nameserver-policy'];
+      if (Object.keys(dns).length === 0) {
+        delete root.dns;
+      }
+    }
+    return;
+  }
+
+  setByPath(root, 'dns.nameserver-policy', policy);
+}
+
+export function createEmptyNameserverPolicy(): NameserverPolicyEntry {
+  return {
+    id: `policy-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    pattern: '',
+    server: '',
+  };
 }
 
 export async function buildConfigFromEditorState(
@@ -208,6 +285,8 @@ export async function buildConfigFromEditorState(
     }
     setByPath(root, field.path, yamlValue);
   }
+
+  applyNameserverPolicy(root, state.nameserverPolicy);
 
   return stringifyYamlRoot(root);
 }

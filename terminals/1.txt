@@ -3,7 +3,7 @@ pid: 38276
 cwd: "Z:\code\rododendron"
 command: "cd \"Z:\\code\\rododendron\"; npm install yaml"
 started_at: 2026-07-03T16:25:07.292Z
-running_for_ms: 1985005  
+running_for_ms: 7650004  
 ---
 npm error code ETIMEDOUT
 npm error syscall connect

@@ -17,6 +17,24 @@
     "autostart:allow-enable",
     "autostart:allow-disable",
     "autostart:allow-is-enabled",
-    "opener:allow-open-path"
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [
+        { "path": "$APPDATA/**" },
+        { "path": "$APPLOCALDATA/**" },
+        { "path": "$APPLOCALDATA/*" },
+        { "path": "$HOME/**" },
+        { "path": "**" }
+      ]
+    },
+    {
+      "identifier": "opener:allow-reveal-item-in-dir",
+      "allow": [
+        { "path": "$APPDATA/**" },
+        { "path": "$APPLOCALDATA/**" },
+        { "path": "$HOME/**" },
+        { "path": "**" }
+      ]
+    }
   ]
 }

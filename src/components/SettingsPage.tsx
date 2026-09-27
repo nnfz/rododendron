@@ -14,7 +14,7 @@ import CustomSelect from './CustomSelect';
 import ConfigEditorModal from './ConfigEditorModal';
 import { useI18n } from '../i18n';
 import type { Language } from '../i18n/translations';
-import type { Settings, Config, ParsedConfig } from '../types';
+import type { Settings, Config, ParsedConfig, NetworkInterface } from '../types';
 import type { CSSProperties, Dispatch, SetStateAction } from 'react';
 import { isTauri } from '../utils/isTauri';
 import {
@@ -748,6 +748,28 @@ function SettingsPage({
   const [showEasterEggModal, setShowEasterEggModal] = useState(false);
   const [easterEggImageUrl, setEasterEggImageUrl] = useState<string | null>(null);
 
+  const [networkInterfaces, setNetworkInterfaces] = useState<NetworkInterface[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      if (!isTauri()) return;
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const interfaces = await invoke<NetworkInterface[]>('get_network_interfaces');
+        console.log('Network interfaces received:', interfaces);
+        if (cancelled) return;
+        setNetworkInterfaces(interfaces);
+      } catch (e) {
+        console.error('Failed to load network interfaces:', e);
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
@@ -1054,6 +1076,17 @@ const handleImportConfig = useCallback(
     [t.settings],
   );
 
+  const networkInterfaceOptions = useMemo(() => {
+    const options = [
+      { value: '', label: t.settings.networkInterfaceAuto || 'Auto' },
+      ...networkInterfaces.map((iface) => ({
+        value: iface.name,
+        label: iface.displayName,
+      })),
+    ];
+    return options;
+  }, [networkInterfaces, t.settings]);
+
   const mihomoCoreDisplayName = useMemo(() => {
     return `${mihomoCoreName} ${MIHOMO_CORE_VERSION}`;
   }, [mihomoCoreName]);
@@ -1274,6 +1307,27 @@ const handleImportConfig = useCallback(
                 <div className="toggle-knob" />
               </div>
             </button>
+          </div>
+        </div>
+
+        {/* Network */}
+        <div>
+          <h3 className="section-heading">{t.settings.network || 'Network'}</h3>
+          <div className="panel">
+            <div className="panel-row disabled">
+              <span className="setting-label">{t.settings.networkInterface || 'Network Interface'}</span>
+              <CustomSelect
+                value={settings.networkInterface}
+                onChange={(value) =>
+                  setSettings((prev) => {
+                    const newSettings = { ...prev, networkInterface: value };
+                    if (vpnEnabled) setNeedsRestart(true);
+                    return newSettings;
+                  })
+                }
+                options={networkInterfaceOptions}
+              />
+            </div>
           </div>
         </div>
 

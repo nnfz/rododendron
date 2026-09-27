@@ -7,10 +7,10 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "sync:version": "node ./scripts/sync-version.mjs",
-    "bump:patch": "npm version patch --no-git-tag-version && npm run sync:version",
-    "bump:minor": "npm version minor --no-git-tag-version && npm run sync:version",
-    "bump:major": "npm version major --no-git-tag-version && npm run sync:version",
+    "sync:version": "bun ./scripts/sync-version.mjs",
+    "bump:patch": "bun version patch --no-git-tag-version && bun run sync:version",
+    "bump:minor": "bun version minor --no-git-tag-version && bun run sync:version",
+    "bump:major": "bun version major --no-git-tag-version && bun run sync:version",
     "tauri": "tauri"
   },
   "dependencies": {

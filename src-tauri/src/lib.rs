@@ -1,22 +1,31 @@
 mod mihomo;
 mod process_scanner;
 mod updater;
+mod task_scheduler;
 
 use mihomo::{
     clear_mihomo_logs, delete_config, export_config_to_path, generate_config,
     get_mihomo_binary_name, get_mihomo_logs, get_vpn_status, import_config, list_configs,
     mihomo_get_connections, mihomo_get_delay, mihomo_get_proxies, mihomo_get_traffic,
-    parse_config, parse_config_yaml, ping_host, read_config, reload_mihomo_config,
-    resolve_config_path, stringify_config_yaml,
+    open_config_file, parse_config, parse_config_yaml, ping_host, read_config,
+    reload_mihomo_config, resolve_config_path, stringify_config_yaml,
     save_rules_to_config, save_rules_to_path, start_vpn, stop_vpn, switch_mihomo_mode,
     switch_proxy_group,
     cleanup_mihomo, health_check, restore_config_backup,
     // === НОВЫЕ КОМАНДЫ AmneziaWG ===
     convert_amnezia_wg_conf,
     import_amnezia_wg_as_config,
+    // === НОВЫЕ КОМАНДЫ Network ===
+    get_network_interfaces,
 };
 use process_scanner::get_running_processes;
 use updater::{check_for_updates, install_update};
+use task_scheduler::{
+    is_task_scheduler_enabled,
+    enable_task_scheduler,
+    disable_task_scheduler,
+    sync_task_scheduler,
+};
 
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
 use tauri::Emitter;
@@ -132,6 +141,13 @@ pub fn run() {
                 .build(),
         )
         .setup(|app| {
+            // ── Проверяем и убиваем осиротевшие процессы при старте ──
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                use mihomo::get_vpn_status;
+                let _ = get_vpn_status(app_handle);
+            });
+
             // ── Tray icon ──
             let icon = build_tray_icon_png(false)?;
             let start = MenuItemBuilder::with_id("tray_start", "Start").build(app)?;
@@ -177,8 +193,9 @@ pub fn run() {
                         }
                     }
                     "tray_stop" => {
+                        let app_clone = app.clone();
                         tauri::async_runtime::spawn(async move {
-                            let _ = stop_vpn().await;
+                            let _ = stop_vpn(app_clone).await;
                         });
                     }
                     "tray_restart" => {
@@ -241,6 +258,7 @@ pub fn run() {
             list_configs,
             export_config_to_path,
             resolve_config_path,
+            open_config_file,
             restore_config_backup,
             // ── Rules ──
             save_rules_to_config,
@@ -264,12 +282,18 @@ pub fn run() {
             ping_host,
             get_mihomo_binary_name,
             health_check,
+            get_network_interfaces,
             // ── UI ──
             set_tray_vpn_enabled,
             set_close_behavior,
             // ── Updater ──
             check_for_updates,
             install_update,
+            // ── Task Scheduler (автозапуск с правами админа) ──
+            is_task_scheduler_enabled,
+            enable_task_scheduler,
+            disable_task_scheduler,
+            sync_task_scheduler,
             // === НОВЫЕ КОМАНДЫ ДЛЯ AMNEZIAWG ===
             convert_amnezia_wg_conf,
             import_amnezia_wg_as_config,

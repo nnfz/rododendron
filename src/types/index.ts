@@ -31,6 +31,13 @@ export interface Settings {
   closeBehavior: 'tray' | 'exit';
   killSwitch: boolean;
   snowfall: boolean;
+  networkInterface: string; // пустая строка = auto
+}
+
+export interface NetworkInterface {
+  name: string;
+  displayName: string;
+  isUp: boolean;
 }
 
 export type TabType = 'home' | 'rules' | 'settings';

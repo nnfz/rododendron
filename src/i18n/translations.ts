@@ -119,12 +119,24 @@ export type Translations = {
     version: string;
     confirmDelete: string;
     versioncore: string;
+    network: string;
+    networkInterface: string;
+    networkInterfaceAuto: string;
     configEditor: {
       openFile: string;
       loading: string;
       addField: string;
       noCustomFields: string;
       fileNotFound: string;
+      nameserverPolicy: string;
+      nameserverPolicyHelp: string;
+      nameserverPolicyPattern: string;
+      nameserverPolicyServer: string;
+      nameserverPolicyPatternPlaceholder: string;
+      nameserverPolicyServerPlaceholder: string;
+      addNameserverPolicy: string;
+      noNameserverPolicy: string;
+      restartHint: string;
       sections: {
         general: string;
         tun: string;
@@ -282,12 +294,24 @@ export const translations: Record<Language, Translations> = {
       about: 'About',
       version: 'Version',
       versioncore: 'Core version',
+      network: 'Network',
+      networkInterface: 'Network Interface',
+      networkInterfaceAuto: 'Auto',
       configEditor: {
         openFile: 'Open file',
         loading: 'Loading config...',
         addField: 'Add parameter',
         noCustomFields: 'No extra parameters. Add one if needed.',
         fileNotFound: 'Config file not found on disk',
+        nameserverPolicy: 'Nameserver policy',
+        nameserverPolicyHelp: 'Per-domain DNS rules. Pattern → DNS server(s). Example: +.ru → 1.1.1.1',
+        nameserverPolicyPattern: 'Pattern',
+        nameserverPolicyServer: 'DNS server',
+        nameserverPolicyPatternPlaceholder: '+.example.com',
+        nameserverPolicyServerPlaceholder: '1.1.1.1',
+        addNameserverPolicy: 'Add policy rule',
+        noNameserverPolicy: 'No policy rules yet.',
+        restartHint: 'Restart VPN to apply DNS changes.',
         sections: {
           general: 'General',
           tun: 'TUN',
@@ -302,6 +326,10 @@ export const translations: Record<Language, Translations> = {
           'tun.mtu': 'Maximum packet size. Lower if you have connection issues.',
           'tun.stack': 'gvisor — userspace. mixed — TCP gvisor, UDP kernel. system — kernel only.',
           'dns.fake-ip-filter': 'Domains that bypass Fake-IP. Add games, STUN and OS checks here.',
+          'dns.default-nameserver': 'Bootstrap DNS resolvers (IP). Used to resolve DoH/DoT endpoints.',
+          'dns.nameserver': 'Main DNS servers. Supports IP, tls://, https://, quic://.',
+          'dns.proxy-server-nameserver': 'DNS for resolving proxy server hostnames.',
+          'dns.fallback': 'Fallback DNS when main DNS returns empty or fails.',
         },
       },
     },
@@ -449,6 +477,9 @@ export const translations: Record<Language, Translations> = {
       about: 'О программе',
       version: 'Версия',
       versioncore: 'Версия ядра',
+      network: 'Сеть',
+      networkInterface: 'Сетевой интерфейс',
+      networkInterfaceAuto: 'Авто',
       autoRestartOnRuleApply: 'Автоприменение правил',
       configEditor: {
         openFile: 'Открыть файл',
@@ -456,6 +487,15 @@ export const translations: Record<Language, Translations> = {
         addField: 'Добавить параметр',
         noCustomFields: 'Дополнительных параметров нет. Добавь, если нужно.',
         fileNotFound: 'Файл конфига не найден на диске',
+        nameserverPolicy: 'Nameserver policy',
+        nameserverPolicyHelp: 'DNS-правила по доменам. Шаблон → DNS-сервер(ы). Пример: +.ru → 1.1.1.1',
+        nameserverPolicyPattern: 'Шаблон',
+        nameserverPolicyServer: 'DNS-сервер',
+        nameserverPolicyPatternPlaceholder: '+.example.com',
+        nameserverPolicyServerPlaceholder: '1.1.1.1',
+        addNameserverPolicy: 'Добавить правило',
+        noNameserverPolicy: 'Правил пока нет.',
+        restartHint: 'Перезапусти VPN, чтобы применить DNS.',
         sections: {
           general: 'Основное',
           tun: 'TUN',
@@ -470,6 +510,10 @@ export const translations: Record<Language, Translations> = {
           'tun.mtu': 'Макс. размер пакета. Уменьши при проблемах с подключением.',
           'tun.stack': 'gvisor — юзерспейс. mixed — TCP gvisor, UDP ядро. system — только ядро.',
           'dns.fake-ip-filter': 'Домены в обход Fake-IP. Игры, STUN и проверки ОС — сюда.',
+          'dns.default-nameserver': 'Bootstrap DNS (IP). Нужен для резолва DoH/DoT адресов.',
+          'dns.nameserver': 'Основные DNS-серверы. IP, tls://, https://, quic://.',
+          'dns.proxy-server-nameserver': 'DNS для резолва адресов прокси-серверов.',
+          'dns.fallback': 'Запасной DNS, если основной не ответил или вернул пусто.',
         },
       },
     },
@@ -617,12 +661,24 @@ export const translations: Record<Language, Translations> = {
       about: 'Пра праграму',
       version: 'Версія',
       versioncore: 'Версія ядра',
+      network: 'Сетка',
+      networkInterface: 'Сеткавы інтэрфейс',
+      networkInterfaceAuto: 'Аўта',
       configEditor: {
         openFile: 'Адкрыць файл',
         loading: 'Загрузка канфіга...',
         addField: 'Дадаць параметр',
         noCustomFields: 'Дадатковых параметраў няма. Дадай, калі трэба.',
         fileNotFound: 'Файл канфіга не знойдзены на дыску',
+        nameserverPolicy: 'Nameserver policy',
+        nameserverPolicyHelp: 'DNS-правілы па даменах. Шаблон → DNS-сервер(ы). Прыклад: +.ru → 1.1.1.1',
+        nameserverPolicyPattern: 'Шаблон',
+        nameserverPolicyServer: 'DNS-сервер',
+        nameserverPolicyPatternPlaceholder: '+.example.com',
+        nameserverPolicyServerPlaceholder: '1.1.1.1',
+        addNameserverPolicy: 'Дадаць правіла',
+        noNameserverPolicy: 'Правілаў пакуль няма.',
+        restartHint: 'Перазапусці VPN, каб прыменіць DNS.',
         sections: {
           general: 'Асноўнае',
           tun: 'TUN',
@@ -637,6 +693,10 @@ export const translations: Record<Language, Translations> = {
           'tun.mtu': 'Макс. памер пакета. Паменшы пры праблемах з падключэннем.',
           'tun.stack': 'gvisor — юзерспейс. mixed — TCP gvisor, UDP ядро. system — толькі ядро.',
           'dns.fake-ip-filter': 'Дамены ў абыход Fake-IP. Гульні, STUN і праверкі ОС — сюды.',
+          'dns.default-nameserver': 'Bootstrap DNS (IP). Патрэбны для рэзолву DoH/DoT адрасаў.',
+          'dns.nameserver': 'Асноўныя DNS-серверы. IP, tls://, https://, quic://.',
+          'dns.proxy-server-nameserver': 'DNS для рэзолву адрасаў проксі-сервераў.',
+          'dns.fallback': 'Рэзервны DNS, калі асноўны не адказаў або вярнуў пуста.',
         },
       },
     },

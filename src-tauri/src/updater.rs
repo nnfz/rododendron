@@ -172,7 +172,7 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
 
     fs::write(&path, &bytes).map_err(|e| format!("Failed to write installer: {e}"))?;
 
-    let _ = mihomo::stop_vpn().await;
+    let _ = mihomo::stop_vpn(app.clone()).await;
 
     #[cfg(target_os = "windows")]
     {

@@ -6,6 +6,7 @@ type StartVPNFn = (
   configContent: string,
   configFilename: string,
   rules: Rule[],
+  networkInterface?: string,
 ) => Promise<void>;
 
 type StopVPNFn = () => Promise<void>;
@@ -14,6 +15,7 @@ type ToggleVPNFn = (
   configContent?: string,
   configFilename?: string,
   rules?: Rule[],
+  networkInterface?: string,
 ) => Promise<void>;
 
 export interface VPNState {
@@ -51,6 +53,7 @@ export function useVPNState(): VPNState {
     configContent: string,
     configFilename: string,
     rules: Rule[],
+    networkInterface?: string,
   ) => {
     if (!isTauri()) {
       setVpnEnabled(true);
@@ -74,6 +77,7 @@ export function useVPNState(): VPNState {
       const finalConfig = await invoke('generate_config', {
         baseConfig: configContent,
         userRules,
+        networkInterface: networkInterface || null,
       }) as string;
 
       const status = await invoke('start_vpn', {
@@ -121,11 +125,12 @@ export function useVPNState(): VPNState {
     configContent?: string,
     configFilename?: string,
     rules?: Rule[],
+    networkInterface?: string,
   ) => {
     if (vpnEnabled) {
       await stopVPN();
     } else if (configContent && configFilename && rules) {
-      await startVPN(configContent, configFilename, rules);
+      await startVPN(configContent, configFilename, rules, networkInterface);
     }
   }, [vpnEnabled, startVPN, stopVPN]);
 

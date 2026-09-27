@@ -54,7 +54,26 @@
             "core:webview:default",
             "notification:default",
             "dialog:default",
-            "fs:default"
+            "fs:default",
+            "opener:default",
+            {
+              "identifier": "opener:allow-open-path",
+              "allow": [
+                { "path": "$APPDATA/**" },
+                { "path": "$APPLOCALDATA/**" },
+                { "path": "$HOME/**" },
+                { "path": "**" }
+              ]
+            },
+            {
+              "identifier": "opener:allow-reveal-item-in-dir",
+              "allow": [
+                { "path": "$APPDATA/**" },
+                { "path": "$APPLOCALDATA/**" },
+                { "path": "$HOME/**" },
+                { "path": "**" }
+              ]
+            }
           ]
         }
       ]

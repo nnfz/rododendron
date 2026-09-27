@@ -8,11 +8,13 @@ import {
   CONFIG_SECTIONS,
   buildConfigFromEditorState,
   createEmptyCustomField,
+  createEmptyNameserverPolicy,
   formatFieldLabel,
   parseConfigEditorState,
   type ConfigEditorState,
   type ConfigFieldSection,
   type ConfigFieldState,
+  type NameserverPolicyEntry,
 } from '../utils/configEditor';
 
 interface ConfigEditorModalProps {
@@ -88,6 +90,84 @@ function StringListEditor({
   );
 }
 
+function NameserverPolicyEditor({
+  entries,
+  onChange,
+  patternPlaceholder,
+  serverPlaceholder,
+  addPolicyLabel,
+  emptyLabel,
+  patternLabel,
+  serverLabel,
+}: {
+  entries: NameserverPolicyEntry[];
+  onChange: (next: NameserverPolicyEntry[]) => void;
+  patternPlaceholder: string;
+  serverPlaceholder: string;
+  addPolicyLabel: string;
+  emptyLabel: string;
+  patternLabel: string;
+  serverLabel: string;
+}) {
+  const updateEntry = (id: string, next: NameserverPolicyEntry) => {
+    onChange(entries.map((entry) => (entry.id === id ? next : entry)));
+  };
+
+  const removeEntry = (id: string) => {
+    onChange(entries.filter((entry) => entry.id !== id));
+  };
+
+  return (
+    <div className="nameserver-policy-editor">
+      {entries.length > 0 && (
+        <div className="nameserver-policy-row nameserver-policy-row-head">
+          <span className="nameserver-policy-col-label">{patternLabel}</span>
+          <span className="nameserver-policy-col-label">{serverLabel}</span>
+          <span />
+        </div>
+      )}
+      {entries.length === 0 ? (
+        <div className="config-editor-empty">{emptyLabel}</div>
+      ) : (
+        entries.map((entry) => (
+          <div key={entry.id} className="nameserver-policy-row">
+            <input
+              type="text"
+              className="input"
+              value={entry.pattern}
+              onChange={(e) => updateEntry(entry.id, { ...entry, pattern: e.target.value })}
+              placeholder={patternPlaceholder}
+            />
+            <input
+              type="text"
+              className="input"
+              value={entry.server}
+              onChange={(e) => updateEntry(entry.id, { ...entry, server: e.target.value })}
+              placeholder={serverPlaceholder}
+            />
+            <button
+              type="button"
+              className="nameserver-policy-remove"
+              onClick={() => removeEntry(entry.id)}
+              aria-label="Remove"
+            >
+              <LuX size={14} />
+            </button>
+          </div>
+        ))
+      )}
+      <button
+        type="button"
+        className="btn btn-ghost-dark nameserver-policy-add"
+        onClick={() => onChange([...entries, createEmptyNameserverPolicy()])}
+      >
+        <LuPlus size={16} />
+        <span>{addPolicyLabel}</span>
+      </button>
+    </div>
+  );
+}
+
 function ConfigFieldRow({
   field,
   onChange,
@@ -133,7 +213,7 @@ function ConfigFieldRow({
         <StringListEditor
           value={Array.isArray(field.value) ? field.value : []}
           onChange={(next) => onChange({ ...field, value: next })}
-          placeholder={listPlaceholder}
+          placeholder={field.listPlaceholder || listPlaceholder}
           addLabel={listAddLabel}
         />
       );
@@ -283,20 +363,15 @@ function ConfigEditorModal({
   }, []);
 
   const handleOpenFile = useCallback(async () => {
-    if (!isTauri()) return;
+    if (!isTauri() || !filename) return;
+    setError(null);
     try {
       const { invoke } = await import('@tauri-apps/api/core');
-      const path = await invoke<string | null>('resolve_config_path', { filename });
-      if (!path) {
-        setError(t.settings.configEditor.fileNotFound);
-        return;
-      }
-      const { openPath } = await import('@tauri-apps/plugin-opener');
-      await openPath(path);
+      await invoke<string>('open_config_file', { filename });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [filename, t.settings.configEditor.fileNotFound]);
+  }, [filename]);
 
   const handleSave = useCallback(async () => {
     if (!editorState || !filename || !isTauri()) return;
@@ -321,8 +396,8 @@ function ConfigEditorModal({
       const parsed = await invoke<ParsedConfig>('parse_config', { configContent: nextContent });
       await invoke('import_config', { configContent: nextContent, filename });
       onSaved(nextContent, parsed);
-      onClose();
       if (vpnEnabled) onNeedsRestart();
+      onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -388,22 +463,52 @@ function ConfigEditorModal({
             <div className="config-editor-sections">
               {CONFIG_SECTIONS.map((section) => {
                 const fields = fieldsBySection.get(section) ?? [];
-                if (!fields.length) return null;
+                const showDnsPolicy = section === 'dns';
+                if (!fields.length && !showDnsPolicy) return null;
                 return (
                   <section key={section} className="config-editor-section">
                     <h4 className="config-editor-section-title">{sectionTitle(section)}</h4>
-                    <div className="panel config-editor-panel">
-                      {fields.map((field) => (
-                        <ConfigFieldRow
-                          key={field.path}
-                          field={field}
-                          helpText={fieldHelp(field.path)}
-                          listPlaceholder={t.settings.fakeIpFilterPlaceholder}
-                          listAddLabel={t.settings.fakeIpFilterAdd}
-                          onChange={(next) => updateField(field.path, next)}
+                    {fields.length > 0 && (
+                      <div className="panel config-editor-panel">
+                        {fields.map((field) => (
+                          <ConfigFieldRow
+                            key={field.path}
+                            field={field}
+                            helpText={fieldHelp(field.path)}
+                            listPlaceholder={t.settings.fakeIpFilterPlaceholder}
+                            listAddLabel={t.settings.fakeIpFilterAdd}
+                            onChange={(next) => updateField(field.path, next)}
+                          />
+                        ))}
+                      </div>
+                    )}
+                    {showDnsPolicy && (
+                      <div className="panel config-editor-panel nameserver-policy-panel">
+                        <div className="config-editor-section-head nameserver-policy-head">
+                          <span className="setting-label setting-label-with-help">
+                            {t.settings.configEditor.nameserverPolicy}
+                            <button type="button" className="help-tooltip">
+                              <LuHelpCircle size={14} className="help-icon" />
+                              <span className="help-tooltip-content">
+                                {t.settings.configEditor.nameserverPolicyHelp}
+                              </span>
+                            </button>
+                          </span>
+                        </div>
+                        <NameserverPolicyEditor
+                          entries={editorState.nameserverPolicy}
+                          onChange={(nameserverPolicy) =>
+                            setEditorState((prev) => (prev ? { ...prev, nameserverPolicy } : prev))
+                          }
+                          patternPlaceholder={t.settings.configEditor.nameserverPolicyPatternPlaceholder}
+                          serverPlaceholder={t.settings.configEditor.nameserverPolicyServerPlaceholder}
+                          addPolicyLabel={t.settings.configEditor.addNameserverPolicy}
+                          emptyLabel={t.settings.configEditor.noNameserverPolicy}
+                          patternLabel={t.settings.configEditor.nameserverPolicyPattern}
+                          serverLabel={t.settings.configEditor.nameserverPolicyServer}
                         />
-                      ))}
-                    </div>
+                      </div>
+                    )}
                   </section>
                 );
               })}

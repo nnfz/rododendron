@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 *.cab
+
+# Bun
+bun.lockb
+
 # Editor directories and files
 .vscode/*
 agent-tools

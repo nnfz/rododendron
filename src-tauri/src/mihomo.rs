@@ -25,6 +25,7 @@ const LOG_DIAG_LINES: usize = 10;
 // ─── Глобальное состояние ────────────────────────────────────────────────────
 
 static MIHOMO_PROCESS: Mutex<Option<Child>> = Mutex::new(None);
+static MIHOMO_PID: Mutex<Option<u32>> = Mutex::new(None);
 
 static CONTROLLER_CONFIG: LazyLock<Mutex<ControllerConfig>> = LazyLock::new(|| {
     Mutex::new(ControllerConfig {
@@ -298,6 +299,74 @@ fn primary_config_dir(app: &AppHandle) -> PathBuf {
         .app_config_dir()
         .or_else(|_| app.path().app_local_data_dir())
         .unwrap_or_else(|_| std::env::temp_dir().join("Rododendron"))
+}
+
+fn get_pid_file_path(app: &AppHandle) -> PathBuf {
+    primary_config_dir(app).join("mihomo.pid")
+}
+
+fn save_pid(app: &AppHandle, pid: u32) {
+    let pid_file = get_pid_file_path(app);
+    let _ = fs::write(&pid_file, pid.to_string());
+}
+
+fn load_pid(app: &AppHandle) -> Option<u32> {
+    let pid_file = get_pid_file_path(app);
+    fs::read_to_string(&pid_file)
+        .ok()
+        .and_then(|s| s.trim().parse::<u32>().ok())
+}
+
+fn clear_pid(app: &AppHandle) {
+    let pid_file = get_pid_file_path(app);
+    let _ = fs::remove_file(&pid_file);
+}
+
+#[cfg(target_os = "windows")]
+fn is_process_running(pid: u32) -> bool {
+    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+    use windows_sys::Win32::Foundation::CloseHandle;
+
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle == 0 {
+            return false;
+        }
+        CloseHandle(handle);
+        true
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn is_process_running(pid: u32) -> bool {
+    use nix::sys::signal::{kill, Signal};
+    use nix::unistd::Pid;
+
+    kill(Pid::from_raw(pid as i32), Signal::SIGCONT).is_ok()
+}
+
+#[cfg(target_os = "windows")]
+fn kill_process_by_pid(pid: u32) -> bool {
+    use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+    use windows_sys::Win32::Foundation::CloseHandle;
+
+    unsafe {
+        let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
+        if handle == 0 {
+            return false;
+        }
+        let result = TerminateProcess(handle, 1);
+        CloseHandle(handle);
+        result != 0
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn kill_process_by_pid(pid: u32) -> bool {
+    use nix::sys::signal::{kill, Signal};
+    use nix::unistd::Pid;
+
+    kill(Pid::from_raw(pid as i32), Signal::SIGKILL).is_ok()
 }
 
 fn all_config_dirs(app: &AppHandle) -> Vec<PathBuf> {
@@ -798,7 +867,145 @@ pub fn cleanup_mihomo() {
             let _ = child.wait();
         }
     }
+
+    // Убиваем процесс по сохраненному PID
+    if let Ok(guard) = MIHOMO_PID.lock() {
+        if let Some(pid) = *guard {
+            let _ = kill_process_by_pid(pid);
+        }
+    }
+
     kill_existing_mihomo();
+}
+
+/// Находит и убивает осиротевшие процессы mihomo
+fn find_and_kill_orphaned_mihomo(app: &AppHandle) {
+    // Проверяем сохраненный PID
+    if let Some(pid) = load_pid(app) {
+        if is_process_running(pid) {
+            let _ = kill_process_by_pid(pid);
+        }
+    }
+
+    // На всякий случай убиваем все процессы mihomo
+    kill_existing_mihomo();
+
+    clear_pid(app);
+}
+
+// ─── Получение списка сетевых интерфейсов ────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkInterface {
+    pub name: String,
+    pub display_name: String,
+    pub is_up: bool,
+}
+
+#[tauri::command]
+pub fn get_network_interfaces() -> Result<Vec<NetworkInterface>, String> {
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::NetworkManagement::IpHelper::{
+            GetAdaptersAddresses, GAA_FLAG_INCLUDE_PREFIX, IP_ADAPTER_ADDRESSES_LH,
+        };
+        use windows_sys::Win32::Networking::WinSock::{AF_UNSPEC, AF_INET, AF_INET6};
+        use std::ptr::null_mut;
+        use std::ffi::OsString;
+        use std::os::windows::ffi::OsStringExt;
+
+        unsafe {
+            let mut size: u32 = 0;
+            // Первый вызов для получения размера буфера
+            GetAdaptersAddresses(
+                AF_UNSPEC as u32,
+                GAA_FLAG_INCLUDE_PREFIX,
+                null_mut(),
+                null_mut(),
+                &mut size,
+            );
+
+            if size == 0 {
+                return Ok(Vec::new());
+            }
+
+            let mut buffer = vec![0u8; size as usize];
+            let result = GetAdaptersAddresses(
+                AF_UNSPEC as u32,
+                GAA_FLAG_INCLUDE_PREFIX,
+                null_mut(),
+                buffer.as_mut_ptr() as *mut IP_ADAPTER_ADDRESSES_LH,
+                &mut size,
+            );
+
+            if result != 0 {
+                return Err(format!("GetAdaptersAddresses failed with code: {}", result));
+            }
+
+            let mut interfaces = Vec::new();
+            let mut current = buffer.as_ptr() as *const IP_ADAPTER_ADDRESSES_LH;
+
+            while !current.is_null() {
+                let adapter = &*current;
+
+                // Получаем friendly name (display name)
+                let mut friendly_len = 0;
+                let mut friendly_ptr = adapter.FriendlyName;
+                while !friendly_ptr.is_null() && *friendly_ptr != 0 {
+                    friendly_len += 1;
+                    friendly_ptr = friendly_ptr.add(1);
+                }
+
+                let friendly_name = if friendly_len > 0 {
+                    let slice = std::slice::from_raw_parts(adapter.FriendlyName, friendly_len);
+                    OsString::from_wide(slice).to_string_lossy().to_string()
+                } else {
+                    // Fallback на AdapterName если FriendlyName пустой
+                    std::ffi::CStr::from_ptr(adapter.AdapterName as *const i8)
+                        .to_string_lossy()
+                        .to_string()
+                };
+
+                // Проверяем, активен ли интерфейс (есть ли у него IP-адреса)
+                let mut is_up = false;
+                let mut addr_ptr = adapter.FirstUnicastAddress;
+                while !addr_ptr.is_null() {
+                    let addr = &*addr_ptr;
+                    let sockaddr = &*addr.Address.lpSockaddr;
+                    if sockaddr.sa_family == AF_INET || sockaddr.sa_family == AF_INET6 {
+                        is_up = true;
+                        break;
+                    }
+                    addr_ptr = addr.Next;
+                }
+
+                // Пропускаем loopback
+                if !friendly_name.to_lowercase().contains("loopback") {
+                    interfaces.push(NetworkInterface {
+                        name: friendly_name.clone(),
+                        display_name: friendly_name,
+                        is_up,
+                    });
+                }
+
+                current = adapter.Next;
+            }
+
+            // Сортируем: активные первыми, затем по имени
+            interfaces.sort_by(|a, b| {
+                b.is_up.cmp(&a.is_up).then_with(|| a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase()))
+            });
+
+            Ok(interfaces)
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        // Для Linux/macOS можно добавить реализацию позже
+        Ok(Vec::new())
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1203,6 +1410,35 @@ pub fn resolve_config_path(app: AppHandle, filename: String) -> Result<Option<St
 }
 
 #[tauri::command(rename_all = "camelCase")]
+pub fn open_config_file(app: AppHandle, filename: String) -> Result<String, String> {
+    use tauri_plugin_opener::OpenerExt;
+
+    let config_path = find_existing_config_path(&app, &filename)
+        .unwrap_or_else(|| primary_config_dir(&app).join(&filename));
+
+    if !config_path.exists() {
+        return Err(format!(
+            "Config file not found: {}",
+            config_path.to_string_lossy()
+        ));
+    }
+
+    let path_str = config_path.to_string_lossy().to_string();
+    let opener = app.opener();
+
+    if let Err(open_err) = opener.open_path(&path_str, None::<&str>) {
+        opener.reveal_item_in_dir(&path_str).map_err(|reveal_err| {
+            format!(
+                "Failed to open config file: {}. Explorer fallback: {}",
+                open_err, reveal_err
+            )
+        })?;
+    }
+
+    Ok(path_str)
+}
+
+#[tauri::command(rename_all = "camelCase")]
 pub fn parse_config_yaml(content: String) -> Result<serde_json::Value, String> {
     let yaml: serde_yaml::Value = serde_yaml::from_str(&content)
         .map_err(|e| format!("Failed to parse YAML: {}", e))?;
@@ -1303,12 +1539,20 @@ fn config_tun_enabled(config_content: &str) -> bool {
 pub fn generate_config(
     base_config: String,
     user_rules: Vec<UserRule>,
+    network_interface: Option<String>,
 ) -> Result<String, String> {
     let mut yaml: serde_yaml::Value = serde_yaml::from_str(&base_config)
         .map_err(|e| format!("Failed to parse YAML: {}", e))?;
 
     if yaml.get("external-controller").is_none() {
         yaml["external-controller"] = serde_yaml::Value::String("127.0.0.1:9090".to_string());
+    }
+
+    // Устанавливаем interface-name если указан
+    if let Some(iface) = network_interface {
+        if !iface.trim().is_empty() && iface != "auto" {
+            yaml["interface-name"] = serde_yaml::Value::String(iface);
+        }
     }
 
     if !user_rules.is_empty() {
@@ -1477,7 +1721,7 @@ pub async fn start_vpn(
 
     rotate_log_file(&log_path);
 
-    // Один lock — без TOCTOU
+    // Убиваем старые процессы
     {
         let mut process_guard = MIHOMO_PROCESS.lock().map_err(|e| e.to_string())?;
         if let Some(mut child) = process_guard.take() {
@@ -1486,7 +1730,8 @@ pub async fn start_vpn(
         }
     }
 
-    kill_existing_mihomo();
+    // Ищем и убиваем осиротевшие процессы
+    find_and_kill_orphaned_mihomo(&app);
 
     let mihomo_path = get_mihomo_path(&app);
 
@@ -1505,6 +1750,8 @@ pub async fn start_vpn(
         .spawn()
         .map_err(|e| format!("Failed to start mihomo: {}", e))?;
 
+    let pid = child.id();
+
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
     spawn_log_reader(stdout, stderr, log_path);
@@ -1513,6 +1760,13 @@ pub async fn start_vpn(
         let mut process_guard = MIHOMO_PROCESS.lock().map_err(|e| e.to_string())?;
         *process_guard = Some(child);
     }
+
+    // Сохраняем PID
+    {
+        let mut pid_guard = MIHOMO_PID.lock().map_err(|e| e.to_string())?;
+        *pid_guard = Some(pid);
+    }
+    save_pid(&app, pid);
 
     // Запоминаем время старта
     if let Ok(mut guard) = START_TIME.lock() {
@@ -1594,7 +1848,7 @@ pub async fn switch_proxy_group(group_name: String, proxy_name: String) -> Resul
 }
 
 #[tauri::command]
-pub async fn stop_vpn() -> Result<VpnStatus, String> {
+pub async fn stop_vpn(app: AppHandle) -> Result<VpnStatus, String> {
     {
         let mut process_guard = MIHOMO_PROCESS.lock().map_err(|e| e.to_string())?;
         if let Some(mut child) = process_guard.take() {
@@ -1605,12 +1859,21 @@ pub async fn stop_vpn() -> Result<VpnStatus, String> {
         }
     }
 
+    // Убиваем по PID
+    if let Ok(mut guard) = MIHOMO_PID.lock() {
+        if let Some(pid) = *guard {
+            let _ = kill_process_by_pid(pid);
+        }
+        *guard = None;
+    }
+
     // Сбрасываем время старта
     if let Ok(mut guard) = START_TIME.lock() {
         *guard = None;
     }
 
     kill_existing_mihomo();
+    clear_pid(&app);
 
     Ok(VpnStatus {
         running: false,
@@ -1622,7 +1885,7 @@ pub async fn stop_vpn() -> Result<VpnStatus, String> {
 }
 
 #[tauri::command]
-pub fn get_vpn_status() -> Result<VpnStatus, String> {
+pub fn get_vpn_status(app: AppHandle) -> Result<VpnStatus, String> {
     let mut process_guard = MIHOMO_PROCESS.lock().map_err(|e| e.to_string())?;
 
     // Проверяем, жив ли процесс
@@ -1630,12 +1893,30 @@ pub fn get_vpn_status() -> Result<VpnStatus, String> {
         match child.try_wait() {
             Ok(Some(_)) => {
                 process_guard.take();
+                if let Ok(mut guard) = MIHOMO_PID.lock() {
+                    *guard = None;
+                }
+                clear_pid(&app);
                 false
             }
             _ => true,
         }
     } else {
-        false
+        // Проверяем, может процесс осиротел
+        if let Some(pid) = load_pid(&app) {
+            if is_process_running(pid) {
+                // Процесс жив, но не отслеживается - это осиротевший процесс
+                if let Ok(mut guard) = MIHOMO_PID.lock() {
+                    *guard = Some(pid);
+                }
+                true
+            } else {
+                clear_pid(&app);
+                false
+            }
+        } else {
+            false
+        }
     };
 
     Ok(VpnStatus {
@@ -1825,3 +2106,4 @@ pub fn delete_config(app: AppHandle, filename: String) -> Result<(), String> {
     }
     Ok(())
 }
+
