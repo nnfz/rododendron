@@ -13,6 +13,7 @@ const DEFAULT_SETTINGS: Settings = {
   closeBehavior: 'tray',
   killSwitch: false,
   snowfall: false,
+  tunMode: true,
   networkInterface: '', // пустая строка = auto
 };
 

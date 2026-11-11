@@ -22,6 +22,7 @@ import {
   enableAutostart,
   isAutostartEnabled,
 } from '../utils/autostart';
+import { appendProxyTransport, readLinkParams, vlessEncryptionParam } from '../utils/proxyTransport';
 
 interface SettingsPageProps {
   setShowLogsModal: (show: boolean) => void;
@@ -48,7 +49,6 @@ type UpdateCheckResult = {
 };
 
 const DELETE_CONFIRM_TIMEOUT = 3000;
-const MIHOMO_CORE_VERSION = '1.19.20';
 
 const EASTER_EGG_IMAGE_URLS: string[] = [
   'https://sun9-23.userapi.com/s/v1/ig2/UxlCqEp8iuDBw9X7APXtXfiz9XPl60eMlMB_Z-auRwfcfRiHLeLCCBmYfjgTZMiR7K9BJ8NluXWEMVZ0EsYm_F2P.jpg?quality=95&as=32x37,48x56,72x84,108x126,160x186,208x242&from=bu&cs=208x0',
@@ -69,19 +69,23 @@ function parseVlessLink(text: string): { yaml: string; filename: string } {
   const name = decodeURIComponent((url.hash || '').replace(/^#/, '')).trim() || 'VLESS';
   const server = url.hostname;
   const port = url.port ? Number(url.port) : 443;
-  const network = (url.searchParams.get('type') || 'tcp').toLowerCase();
-  const security = (url.searchParams.get('security') || '').toLowerCase();
-  const pbk = url.searchParams.get('pbk') || '';
-  const fp = url.searchParams.get('fp') || '';
-  const sni = url.searchParams.get('sni') || '';
-  const sid = url.searchParams.get('sid') || '';
-  const flow = url.searchParams.get('flow') || '';
+  const params = readLinkParams(url.search);
+  const network = (params.type || 'tcp').toLowerCase();
+  const security = (params.security || '').toLowerCase();
+  const pbk = params.pbk || '';
+  const fp = params.fp || '';
+  const sni = params.sni || '';
+  const sid = params.sid || '';
+  const flow = params.flow || '';
   const tlsEnabled = security === 'reality' || security === 'tls';
-  
-  const host = url.searchParams.get('host') || '';
-  const path = url.searchParams.get('path') || '';
-  const mode = url.searchParams.get('mode') || '';
-  const serviceName = url.searchParams.get('serviceName') || '';
+  const host = params.host || '';
+  const path = params.path || '';
+  const mode = params.mode || '';
+  const serviceName = params.serviceName || '';
+  const spx = params.spx || '';
+  const extra = params.extra || '';
+  const encryption = vlessEncryptionParam(params);
+  const mlkem = params['support-x25519mlkem768'];
 
   const safeName = name.replace(/[\\/:*?"<>|]+/g, '-').slice(0, 60) || 'VLESS';
   const filename = `${safeName}.yaml`;
@@ -93,40 +97,28 @@ function parseVlessLink(text: string): { yaml: string; filename: string } {
     `    port: ${port}`,
     `    uuid: ${url.username}`,
     '    udp: true',
-    '    packet-encoding: xudp',
     `    network: ${network}`,
     `    tls: ${tlsEnabled}`,
   ];
 
-  if (sni) proxyLines.push(`    servername: ${sni}`);
-  if (fp) proxyLines.push(`    client-fingerprint: ${fp}`);
-  if (flow) proxyLines.push(`    flow: ${flow}`);
-
-  if (security === 'reality') {
-    proxyLines.push('    reality-opts:');
-    if (pbk) proxyLines.push(`      public-key: ${pbk}`);
-    if (sid) proxyLines.push(`      short-id: ${sid}`);
-  }
-
-  if (network === 'xhttp') {
-    proxyLines.push('    xhttp-opts:');
-    if (mode) proxyLines.push(`      mode: ${mode}`);
-    if (host || path) {
-      proxyLines.push('      extra:');
-      if (host) proxyLines.push(`        host: "${host}"`);
-      if (path) proxyLines.push(`        path: "${path}"`);
-    }
-  } else if (network === 'ws') {
-    proxyLines.push('    ws-opts:');
-    if (path) proxyLines.push(`      path: "${path}"`);
-    if (host) {
-      proxyLines.push('      headers:');
-      proxyLines.push(`        Host: "${host}"`);
-    }
-  } else if (network === 'grpc') {
-    proxyLines.push('    grpc-opts:');
-    if (serviceName) proxyLines.push(`      grpc-service-name: "${serviceName}"`);
-  }
+  appendProxyTransport(proxyLines, {
+    network,
+    security,
+    pbk,
+    fp,
+    sni,
+    sid,
+    flow,
+    spx,
+    host,
+    path,
+    mode,
+    extra,
+    serviceName,
+    encryption,
+    mlkem,
+    sniKey: 'servername',
+  });
 
   const yaml = [
     'mixed-port: 7890',
@@ -330,15 +322,23 @@ function parseTrojanLink(text: string): { yaml: string; filename: string } {
   const password = decodeURIComponent(url.username);
   const server = url.hostname;
   const port = url.port ? Number(url.port) : 443;
-  const sni = url.searchParams.get('sni') || '';
-  const alpn = url.searchParams.get('alpn') || '';
-  const insecure = url.searchParams.get('allowInsecure') === '1';
-  
-  const network = (url.searchParams.get('type') || 'tcp').toLowerCase();
-  const host = url.searchParams.get('host') || '';
-  const path = url.searchParams.get('path') || '';
-  const mode = url.searchParams.get('mode') || '';
-  const serviceName = url.searchParams.get('serviceName') || '';
+  const params = readLinkParams(url.search);
+  const sni = params.sni || '';
+  const alpn = params.alpn || '';
+  const insecure = params.allowInsecure === '1';
+  const network = (params.type || 'tcp').toLowerCase();
+  const security = (params.security || '').toLowerCase();
+  const pbk = params.pbk || '';
+  const fp = params.fp || '';
+  const sid = params.sid || '';
+  const flow = params.flow || '';
+  const spx = params.spx || '';
+  const host = params.host || '';
+  const path = params.path || '';
+  const mode = params.mode || '';
+  const extra = params.extra || '';
+  const serviceName = params.serviceName || '';
+  const mlkem = params['support-x25519mlkem768'];
 
   if (!password || !server) throw new Error('Missing password or server in trojan:// link');
 
@@ -358,7 +358,6 @@ function parseTrojanLink(text: string): { yaml: string; filename: string } {
     proxyLines.push(`    network: ${network}`);
   }
 
-  if (sni) proxyLines.push(`    sni: ${sni}`);
   if (insecure) proxyLines.push('    skip-cert-verify: true');
   if (alpn) {
     const alpnList = alpn.split(',').map((a) => a.trim()).filter(Boolean);
@@ -366,25 +365,23 @@ function parseTrojanLink(text: string): { yaml: string; filename: string } {
     alpnList.forEach((a) => proxyLines.push(`      - ${a}`));
   }
 
-  if (network === 'xhttp') {
-    proxyLines.push('    xhttp-opts:');
-    if (mode) proxyLines.push(`      mode: ${mode}`);
-    if (host || path) {
-      proxyLines.push('      extra:');
-      if (host) proxyLines.push(`        host: "${host}"`);
-      if (path) proxyLines.push(`        path: "${path}"`);
-    }
-  } else if (network === 'ws') {
-    proxyLines.push('    ws-opts:');
-    if (path) proxyLines.push(`      path: "${path}"`);
-    if (host) {
-      proxyLines.push('      headers:');
-      proxyLines.push(`        Host: "${host}"`);
-    }
-  } else if (network === 'grpc') {
-    proxyLines.push('    grpc-opts:');
-    if (serviceName) proxyLines.push(`      grpc-service-name: "${serviceName}"`);
-  }
+  appendProxyTransport(proxyLines, {
+    network,
+    security,
+    pbk,
+    fp,
+    sni,
+    sid,
+    flow,
+    spx,
+    host,
+    path,
+    mode,
+    extra,
+    serviceName,
+    mlkem,
+    sniKey: 'sni',
+  });
 
   const yaml = [
     'mixed-port: 7890',
@@ -738,6 +735,7 @@ function SettingsPage({
   const [isCheckingUpdates, setIsCheckingUpdates] = useState(false);
   const [isInstallingUpdate, setIsInstallingUpdate] = useState(false);
   const [mihomoCoreName, setMihomoCoreName] = useState<string>('mihomo');
+  const [mihomoCoreVersion, setMihomoCoreVersion] = useState<string>('');
   const [vlessImportError, setVlessImportError] = useState<string | null>(null);
   const [isImportingVless, setIsImportingVless] = useState(false);
 
@@ -776,10 +774,16 @@ function SettingsPage({
       if (!isTauri()) return;
       try {
         const { invoke } = await import('@tauri-apps/api/core');
-        const name = await invoke<string>('get_mihomo_binary_name');
+        const [name, version] = await Promise.all([
+          invoke<string>('get_mihomo_binary_name'),
+          invoke<string>('get_mihomo_core_version').catch(() => ''),
+        ]);
         if (cancelled) return;
         if (typeof name === 'string' && name.trim()) {
           setMihomoCoreName(name.trim());
+        }
+        if (typeof version === 'string' && version.trim()) {
+          setMihomoCoreVersion(version.trim());
         }
       } catch {
         // ignore
@@ -841,7 +845,7 @@ function SettingsPage({
         }
 
         // These settings require VPN restart — signal via sidebar button
-        const settingsRequiringRestart: (keyof Settings)[] = ['killSwitch'];
+        const settingsRequiringRestart: (keyof Settings)[] = ['killSwitch', 'tunMode'];
         if (vpnEnabled && settingsRequiringRestart.includes(key)) {
           setNeedsRestart(true);
         }
@@ -933,6 +937,7 @@ const handleImportConfig = useCallback(
           await invoke('import_config', {
             configContent: importContent,
             filename: importFilename,
+            applyDefaults: true,
           });
 
           const newConfig: Config = {
@@ -963,7 +968,7 @@ const handleImportConfig = useCallback(
       const { yaml, filename } = parseProxyLink(text);
 
       const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('import_config', { configContent: yaml, filename });
+      await invoke('import_config', { configContent: yaml, filename, applyDefaults: true });
 
       const newConfig: Config = {
         id: `config-${Date.now()}-${filename}`,
@@ -1088,8 +1093,8 @@ const handleImportConfig = useCallback(
   }, [networkInterfaces, t.settings]);
 
   const mihomoCoreDisplayName = useMemo(() => {
-    return `${mihomoCoreName} ${MIHOMO_CORE_VERSION}`;
-  }, [mihomoCoreName]);
+    return mihomoCoreVersion ? `${mihomoCoreName} ${mihomoCoreVersion}` : mihomoCoreName;
+  }, [mihomoCoreName, mihomoCoreVersion]);
 
   const versionKickLevel = useMemo(() => {
     return Math.max(0, versionClickCount - 5);
@@ -1314,6 +1319,38 @@ const handleImportConfig = useCallback(
         <div>
           <h3 className="section-heading">{t.settings.network || 'Network'}</h3>
           <div className="panel">
+            <div
+              className="panel-row"
+              role="button"
+              tabIndex={0}
+              onClick={() => toggleSetting('tunMode')}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  toggleSetting('tunMode');
+                }
+              }}
+            >
+              <span className="setting-label setting-label-with-help">
+                {t.settings.enableTun}
+                <button
+                  type="button"
+                  className="help-tooltip"
+                  onClick={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  <LuHelpCircle size={14} className="help-icon" />
+                  <span className="help-tooltip-content">{t.settings.enableTunHelp}</span>
+                </button>
+              </span>
+              <div
+                className={`toggle ${settings.tunMode ? 'on' : ''}`}
+                role="switch"
+                aria-checked={settings.tunMode}
+              >
+                <div className="toggle-knob" />
+              </div>
+            </div>
             <div className="panel-row disabled">
               <span className="setting-label">{t.settings.networkInterface || 'Network Interface'}</span>
               <CustomSelect

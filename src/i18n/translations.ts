@@ -89,6 +89,7 @@ export type Translations = {
     autoConnect: string;
     autoLaunch: string;
     enableTun: string;
+    enableTunHelp: string;
     startminimized: string;
     closeBehavior: string;
     closeToTray: string;
@@ -272,7 +273,8 @@ export const translations: Record<Language, Translations> = {
       killSwitchHelp: 'Blocks internet access when VPN is disconnected to prevent traffic leaks.',
       advanced: 'Advanced',
       logLevel: 'Log level',
-      enableTun: 'Enable TUN',
+      enableTun: 'TUN mode',
+      enableTunHelp: 'Captures all system traffic. Off leaves only the local proxy at 127.0.0.1.',
       mtu: 'MTU',
       mtuHelp: 'Maximum packet size. Lower it if you have connection issues; 1500 is default.',
       tunStack: 'TUN Stack',
@@ -440,7 +442,8 @@ export const translations: Record<Language, Translations> = {
       autoCheckUpdates: 'Автопроверка обновлений',
       interfaceLanguage: 'Язык интерфейса',
       logsAndDiagnostics: 'Логи и диагностика',
-      enableTun: 'Включить TUN',
+      enableTun: 'Режим TUN',
+      enableTunHelp: 'Забирает весь трафик системы. Выключено — остаётся только локальный прокси 127.0.0.1.',
       snowfall: 'Снежинки',
       logs: 'Логи',
       editConfig: 'Редактировать конфиг',
@@ -624,7 +627,8 @@ export const translations: Record<Language, Translations> = {
       importurl: 'Уставіць з буфера абмену',
       autoCheckUpdates: 'Аўтапраўерка абнаўленняў',
       autoRestartOnRuleApply: 'Аўтапрымаўленне правіл',
-      enableTun: 'Уключыць TUN',
+      enableTun: 'Рэжым TUN',
+      enableTunHelp: 'Забірае ўвесь трафік сістэмы. Выключана — застаецца толькі лакальны проксі 127.0.0.1.',
       editConfig: 'Рэдагаваць конфиг',
       logs: 'Логі',
       confirmDelete: 'Вы ўпэўнены?',

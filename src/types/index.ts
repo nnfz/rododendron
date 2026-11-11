@@ -31,6 +31,7 @@ export interface Settings {
   closeBehavior: 'tray' | 'exit';
   killSwitch: boolean;
   snowfall: boolean;
+  tunMode: boolean;
   networkInterface: string; // пустая строка = auto
 }
 

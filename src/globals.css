@@ -2569,7 +2569,8 @@ select.input option {
 /* ─── Config Editor Modal ─────────────────────────────── */
 
 .config-editor-modal {
-  width: min(92vw, 720px);
+  width: min(92vw, 880px);
+  height: min(88vh, 760px);
   max-height: min(88vh, 760px);
   display: flex;
   flex-direction: column;
@@ -2611,6 +2612,34 @@ select.input option {
   flex-direction: column;
   overflow: hidden;
   padding: 0 !important;
+  min-height: 0;
+}
+
+.config-editor-text {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  resize: none;
+  border: none;
+  outline: none;
+  margin: 0;
+  padding: 16px 18px 20px;
+  background: transparent;
+  color: inherit;
+  font-family: 'JetBrains Mono', 'Cascadia Code', monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  tab-size: 2;
+  white-space: pre;
+  overflow: auto;
+}
+
+.config-editor-text:focus {
+  outline: none;
+}
+
+.config-editor-text:disabled {
+  opacity: 0.6;
 }
 
 .config-editor-sections {

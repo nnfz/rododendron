@@ -129,7 +129,11 @@ export function useConfigStorage(
 
       try {
         const { invoke } = await import('@tauri-apps/api/core');
-        await invoke<string>('import_config', { configContent: content, filename });
+        await invoke<string>('import_config', {
+          configContent: content,
+          filename,
+          applyDefaults: true,
+        });
 
         const newConfig: Config = {
           id: `config-${Date.now()}`,

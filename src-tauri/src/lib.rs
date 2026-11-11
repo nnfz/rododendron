@@ -9,7 +9,7 @@ mod task_scheduler;
 
 use mihomo::{
     clear_mihomo_logs, delete_config, export_config_to_path, generate_config,
-    get_mihomo_binary_name, get_mihomo_logs, get_vpn_status, import_config, list_configs,
+    get_mihomo_binary_name, get_mihomo_core_version, get_mihomo_logs, get_vpn_status, import_config, list_configs,
     mihomo_get_connections, mihomo_get_delay, mihomo_get_proxies, mihomo_get_traffic,
     open_config_file, parse_config, parse_config_yaml, ping_host, read_config,
     reload_mihomo_config, resolve_config_path, stringify_config_yaml,
@@ -312,6 +312,7 @@ pub fn run() {
             // ── Utilities ──
             ping_host,
             get_mihomo_binary_name,
+            get_mihomo_core_version,
             health_check,
             get_network_interfaces,
             // ── Metrics ──

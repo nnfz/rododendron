@@ -73,9 +73,7 @@ function HomePage({
   ]);
 
   const handleClick = () => {
-    if (!isConnecting) {
-      toggleVPN();
-    }
+    void toggleVPN();
   };
 
   const subtitle = useMemo(() => {

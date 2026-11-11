@@ -66,7 +66,9 @@ pub fn detect_optimal_mtu() -> u16 {
     1420
 }
 
-/// Оптимизирует TCP стек для VPN
+/// OS-wide TCP tweaks. Not called on VPN start: netsh/sysctl can stall for
+/// seconds when the machine is low on memory.
+#[allow(dead_code)]
 pub fn optimize_tcp_stack() -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
@@ -132,97 +134,4 @@ pub fn optimize_tcp_stack() -> Result<(), String> {
     }
 
     Ok(())
-}
-
-/// Строит оптимизированную DNS конфигурацию для mihomo
-pub fn build_optimized_dns_config() -> serde_yaml::Mapping {
-    let mut dns = serde_yaml::Mapping::new();
-
-    dns.insert("enable".into(), serde_yaml::Value::Bool(true));
-    dns.insert("ipv6".into(), serde_yaml::Value::Bool(true));
-    dns.insert(
-        "enhanced-mode".into(),
-        serde_yaml::Value::String("fake-ip".to_string()),
-    );
-    dns.insert(
-        "fake-ip-range".into(),
-        serde_yaml::Value::String("198.18.0.1/16".to_string()),
-    );
-
-    // Используем более быстрые DNS резолверы с HTTP/3
-    dns.insert(
-        "nameserver".into(),
-        serde_yaml::Value::Sequence(vec![
-            // Cloudflare DNS с HTTP/3 для минимальной задержки
-            serde_yaml::Value::String("https://1.1.1.1/dns-query#h3=true".to_string()),
-            // TLS fallback
-            serde_yaml::Value::String("tls://1.1.1.1".to_string()),
-            // Google DNS fallback
-            serde_yaml::Value::String("https://8.8.8.8/dns-query".to_string()),
-        ]),
-    );
-
-    // DNS кеширование
-    dns.insert("cache".into(), serde_yaml::Value::Bool(true));
-
-    // Обычный DNS fallback для случаев когда DoH недоступен
-    dns.insert(
-        "fallback".into(),
-        serde_yaml::Value::Sequence(vec![
-            serde_yaml::Value::String("1.1.1.1".to_string()),
-            serde_yaml::Value::String("8.8.8.8".to_string()),
-        ]),
-    );
-
-    // Правила fallback - использовать его для CN доменов
-    let mut fallback_filter = serde_yaml::Mapping::new();
-    fallback_filter.insert("geoip".into(), serde_yaml::Value::Bool(true));
-    fallback_filter.insert(
-        "geoip-code".into(),
-        serde_yaml::Value::String("CN".to_string()),
-    );
-    fallback_filter.insert("ipcidr".into(), serde_yaml::Value::Sequence(vec![
-        serde_yaml::Value::String("240.0.0.0/4".to_string()),
-    ]));
-    dns.insert(
-        "fallback-filter".into(),
-        serde_yaml::Value::Mapping(fallback_filter),
-    );
-
-    dns.insert(
-        "default-nameserver".into(),
-        serde_yaml::Value::Sequence(vec![
-            serde_yaml::Value::String("1.1.1.1".to_string()),
-            serde_yaml::Value::String("8.8.8.8".to_string()),
-        ]),
-    );
-
-    dns
-}
-
-/// Добавляет оптимизации dialer в конфиг mihomo
-pub fn add_dialer_optimizations(root: &mut serde_yaml::Mapping) {
-    // Global client fingerprint для обхода DPI
-    root.insert(
-        "global-client-fingerprint".into(),
-        serde_yaml::Value::String("chrome".to_string()),
-    );
-
-    // TCP настройки
-    root.insert(
-        "tcp-concurrent".into(),
-        serde_yaml::Value::Bool(true),
-    );
-
-    // Отключаем Nagle для уменьшения задержки
-    root.insert(
-        "tcp-no-delay".into(),
-        serde_yaml::Value::Bool(true),
-    );
-
-    // Keep-alive интервал
-    root.insert(
-        "keep-alive-interval".into(),
-        serde_yaml::Value::Number(serde_yaml::Number::from(30u64)),
-    );
 }

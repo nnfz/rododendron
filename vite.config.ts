@@ -11,7 +11,7 @@ export default defineConfig(async () => ({
   server: {
     port: 1420,
     strictPort: true,
-    host: process.env.TAURI_DEV_HOST || false,
+    host: process.env.TAURI_DEV_HOST || "127.0.0.1",
     hmr: process.env.TAURI_DEV_HOST
       ? {
           protocol: "ws",

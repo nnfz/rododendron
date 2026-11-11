@@ -7,6 +7,7 @@ type StartVPNFn = (
   configFilename: string,
   rules: Rule[],
   networkInterface?: string,
+  tunMode?: boolean,
 ) => Promise<void>;
 
 type StopVPNFn = () => Promise<void>;
@@ -54,6 +55,7 @@ export function useVPNState(): VPNState {
     configFilename: string,
     rules: Rule[],
     networkInterface?: string,
+    tunMode?: boolean,
   ) => {
     if (!isTauri()) {
       setVpnEnabled(true);
@@ -78,6 +80,7 @@ export function useVPNState(): VPNState {
         baseConfig: configContent,
         userRules,
         networkInterface: networkInterface || null,
+        tunMode: typeof tunMode === 'boolean' ? tunMode : null,
       }) as string;
 
       const status = await invoke('start_vpn', {
@@ -85,17 +88,15 @@ export function useVPNState(): VPNState {
         configFilename,
       }) as VpnStatus;
 
-      await new Promise(resolve => setTimeout(resolve, 1200));
-      try {
-        const verified = await invoke('get_vpn_status') as VpnStatus;
-        setVpnEnabled(verified.running);
-        setVpnStatus(verified);
-      } catch {
-        setVpnEnabled(status.running);
-        setVpnStatus(status);
-      }
+      setVpnEnabled(status.running);
+      setVpnStatus(status);
     } catch (e: unknown) {
       const errMsg = e instanceof Error ? e.message : String(e);
+      if (errMsg.includes('VPN stop requested')) {
+        setVpnEnabled(false);
+        setError(null);
+        return;
+      }
       setError(errMsg);
       console.error('Failed to start VPN:', e);
       throw new Error(errMsg);

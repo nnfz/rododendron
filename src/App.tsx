@@ -33,6 +33,7 @@ export default function App() {
   const autoConnectTriggeredRef = useRef(false);
   const autoConnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wasVpnEnabledRef = useRef(false);
+  const userStopRef = useRef(false);
   const restartVpnTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const restartVpnInFlightRef = useRef(false);
   const restartVpnPendingRulesRef = useRef<Rule[] | null>(null);
@@ -310,8 +311,12 @@ export default function App() {
     async (rulesOverride?: Rule[]) => {
       restartVpnPendingRulesRef.current = rulesOverride ?? rules;
       if (restartVpnTimeoutRef.current) clearTimeout(restartVpnTimeoutRef.current);
-      restartVpnTimeoutRef.current = setTimeout(async () => {
-        if (restartVpnInFlightRef.current) return;
+
+      const runRestart = async () => {
+        if (restartVpnInFlightRef.current) {
+          restartVpnTimeoutRef.current = setTimeout(() => { void runRestart(); }, 200);
+          return;
+        }
         if (!activeConfigContent || !activeConfigFilename) { addLog('ERROR', 'No active config content found'); return; }
         restartVpnInFlightRef.current = true;
         try {
@@ -323,7 +328,7 @@ export default function App() {
               try {
                 const { invoke } = await import('@tauri-apps/api/core');
                 const userRules = rulesToApply.map(r => ({ id: r.id, app: r.app, rule: r.rule, active: r.active, rule_type: r.ruleType || 'process' }));
-                const finalConfig = (await invoke('generate_config', { baseConfig: activeConfigContent, userRules })) as string;
+                const finalConfig = (await invoke('generate_config', { baseConfig: activeConfigContent, userRules, tunMode: settings.tunMode })) as string;
                 addLog('INFO', 'Applying rules without restart...');
                 await invoke('reload_mihomo_config', { configContent: finalConfig, configFilename: activeConfigFilename });
                 addLog('INFO', 'Rules applied');
@@ -335,14 +340,15 @@ export default function App() {
             }
             addLog('INFO', 'Restarting VPN...');
             await stopVPN();
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            await startVPN(activeConfigContent, activeConfigFilename, rulesToApply);
+            await startVPN(activeConfigContent, activeConfigFilename, rulesToApply, undefined, settings.tunMode);
             setVpnRunningConfigId(activeConfigId || null);
             setRestartRequiredForConfig(false);
             addLog('INFO', 'VPN restarted');
           }
         } finally { restartVpnInFlightRef.current = false; }
-      }, 500);
+      };
+
+      restartVpnTimeoutRef.current = setTimeout(() => { void runRestart(); }, 500);
     },
     [activeConfigContent, activeConfigFilename, rules, settings, stopVPN, startVPN, addLog, activeConfigId]
   );
@@ -359,7 +365,7 @@ export default function App() {
           if (!activeConfigContent || !activeConfigFilename) { addLog('ERROR', 'No active config selected for Start'); return; }
           try {
             addLog('INFO', 'Starting VPN (tray)...');
-            await startVPN(activeConfigContent, activeConfigFilename, rules);
+            await startVPN(activeConfigContent, activeConfigFilename, rules, undefined, settings.tunMode);
             setVpnRunningConfigId(activeConfigId || null);
             setRestartRequiredForConfig(false);
             setConnectedConfigSnapshot({ proxy_name: parsedConfig?.proxy_name ?? null, server_address: parsedConfig?.server_address ?? null, mixed_port: typeof parsedConfig?.mixed_port === 'number' ? parsedConfig.mixed_port : null });
@@ -466,20 +472,21 @@ export default function App() {
   }, [rules, activeConfigFilename]);
 
   const handleToggleVPN = useCallback(async () => {
-    if (vpnEnabled) {
-      if (settings.killSwitch) { addLog('WARNING', 'Kill switch is enabled. Disable it in Settings to disconnect.'); return; }
+    if (vpnEnabled || isConnecting) {
+      userStopRef.current = true;
       await stopVPN();
       setConnectedConfigSnapshot(null);
     } else {
+      userStopRef.current = false;
       if (!activeConfigContent || !activeConfigFilename) { addLog('ERROR', 'No config selected or invalid config file'); return; }
       try {
-        await startVPN(activeConfigContent, activeConfigFilename, rules);
+        await startVPN(activeConfigContent, activeConfigFilename, rules, undefined, settings.tunMode);
         setVpnRunningConfigId(activeConfigId || null);
         setRestartRequiredForConfig(false);
         setConnectedConfigSnapshot({ proxy_name: parsedConfig?.proxy_name ?? null, server_address: parsedConfig?.server_address ?? null, mixed_port: typeof parsedConfig?.mixed_port === 'number' ? parsedConfig.mixed_port : null });
       } catch (error) { addLog('ERROR', `Failed to start VPN: ${error instanceof Error ? error.message : String(error)}`); }
     }
-  }, [vpnEnabled, activeConfigContent, activeConfigFilename, rules, settings, startVPN, stopVPN, addLog, parsedConfig, activeConfigId]);
+  }, [vpnEnabled, isConnecting, activeConfigContent, activeConfigFilename, rules, settings, startVPN, stopVPN, addLog, parsedConfig, activeConfigId]);
 
   useEffect(() => {
     return () => { if (autoConnectTimeoutRef.current) { clearTimeout(autoConnectTimeoutRef.current); autoConnectTimeoutRef.current = null; } };
@@ -504,6 +511,11 @@ export default function App() {
   }, [settings.autoConnect, vpnEnabled, isConnecting, activeConfigContent, activeConfigFilename, handleToggleVPN, addLog]);
 
   useEffect(() => {
+    if (userStopRef.current) {
+      userStopRef.current = false;
+      wasVpnEnabledRef.current = vpnEnabled;
+      return;
+    }
     if (!settings.killSwitch) { wasVpnEnabledRef.current = vpnEnabled; return; }
     if (wasVpnEnabledRef.current && !vpnEnabled && !isConnecting) {
       addLog('WARNING', 'VPN stopped while kill switch is enabled. Attempting to reconnect...');
