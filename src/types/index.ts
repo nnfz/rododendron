@@ -41,7 +41,13 @@ export interface NetworkInterface {
   isUp: boolean;
 }
 
-export type TabType = 'home' | 'rules' | 'settings';
+export type TabType = 'home' | 'connections' | 'rules' | 'settings';
+
+export interface RenamedConfig {
+  filename: string;
+  title: string;
+  subscription: boolean;
+}
 
 // Mihomo types
 export interface ProxyConfig {
@@ -81,4 +87,26 @@ export interface Config {
   name: string;
   filename: string;
   content?: string;
+}
+
+export interface SubscriptionNode {
+  id: string;
+  name: string;
+  server: string;
+  port: number;
+  proxyType: string;
+}
+
+export interface SubscriptionInfo {
+  filename: string;
+  title: string;
+  maskedUrl: string;
+  updatedAt: string;
+  intervalHours: number | null;
+  customIntervalHours: number | null;
+  url: string;
+  userinfo: string | null;
+  selectedServerId: string | null;
+  nodes: SubscriptionNode[];
+  userRuleLines: string[];
 }

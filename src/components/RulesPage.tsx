@@ -6,7 +6,9 @@ import { useI18n } from '../i18n';
 
 import type { Rule, Tag } from '../types';
 import { isTauri } from '../utils/isTauri';
+import { nextPresetName, rulesFromTemplate, RULE_TEMPLATES, withoutPreset, type RulePreset } from '../utils/rulePresets';
 import CustomSelect from './CustomSelect';
+import PresetBar from './PresetBar';
 
 const TAG_COLOR_PRESETS = [
   '#ef4444','#f97316','#f59e0b','#eab308','#22c55e','#10b981','#14b8a6','#06b6d4',
@@ -189,11 +191,17 @@ function ColorPicker({ value, onChange, ariaLabel }: { value: string; onChange: 
 interface RulesPageProps {
   rules: Rule[];
   setRules: Dispatch<SetStateAction<Rule[]>>;
+  presets: RulePreset[];
+  activePresetId: string;
+  onSelectPreset: (id: string) => void;
+  onCreatePreset: (name: string, rules: Rule[]) => void;
+  onRenamePreset: (id: string, name: string) => void;
+  onDeletePreset: (id: string) => void;
+  presetsReady: boolean;
   tags: Tag[];
   setTags: Dispatch<SetStateAction<Tag[]>>;
   vpnEnabled: boolean;
   restartVPN: (rulesOverride?: Rule[]) => Promise<void>;
-  activeConfigFilename: string | null;
   autoRestartOnRuleApply: boolean;
 }
 
@@ -204,7 +212,22 @@ interface ProcessInfo { name: string; pid: number; path?: string | null; icon?: 
 const RULE_TYPE_ICONS = { process: LuMonitor, domain: LuGlobe, domain_keyword: LuHash } as const;
 const RULE_TYPE_LABELS = { process: 'Process', domain: 'Domain', domain_keyword: 'Keyword' } as const;
 
-function RulesPage({ rules, setRules, tags, setTags, vpnEnabled, restartVPN, autoRestartOnRuleApply }: RulesPageProps) {
+function RulesPage({
+  rules,
+  setRules,
+  presets,
+  activePresetId,
+  onSelectPreset,
+  onCreatePreset,
+  onRenamePreset,
+  onDeletePreset,
+  presetsReady,
+  tags,
+  setTags,
+  vpnEnabled,
+  restartVPN,
+  autoRestartOnRuleApply,
+}: RulesPageProps) {
   const { t } = useI18n();
   const [osPlatform, setOsPlatform] = useState<'windows' | 'macos' | 'linux' | 'unknown'>('unknown');
   const [newRuleApp, setNewRuleApp] = useState('');
@@ -485,6 +508,57 @@ function RulesPage({ rules, setRules, tags, setTags, vpnEnabled, restartVPN, aut
     { value: 'Direct', label: t.rules.direct },
   ], [t.rules.viaVpn, t.rules.direct]);
 
+  const applyPresetRules = useCallback((nextRules: Rule[]) => {
+    if (vpnEnabled && autoRestartOnRuleApply) void restartVPN(nextRules);
+  }, [autoRestartOnRuleApply, restartVPN, vpnEnabled]);
+
+  const handleSelectPreset = useCallback((id: string) => {
+    if (id === activePresetId) return;
+    const preset = presets.find(item => item.id === id);
+    if (!preset) return;
+    onSelectPreset(id);
+    applyPresetRules(preset.rules);
+  }, [activePresetId, applyPresetRules, onSelectPreset, presets]);
+
+  const handleCreatePreset = useCallback(() => {
+    onCreatePreset(nextPresetName(presets, t.rules.preset), rules);
+  }, [onCreatePreset, presets, rules, t.rules.preset]);
+
+  const handleAddTemplate = useCallback((templateId: string) => {
+    const template = RULE_TEMPLATES.find(item => item.id === templateId);
+    if (!template) return;
+    const label = templateId === 'browsers'
+      ? t.rules.templateBrowsers
+      : templateId === 'messengers'
+        ? t.rules.templateMessengers
+        : t.rules.templateLaunchers;
+    const nextRules = rulesFromTemplate(template);
+    onCreatePreset(nextPresetName(presets, label), nextRules);
+    applyPresetRules(nextRules);
+  }, [applyPresetRules, onCreatePreset, presets, t.rules.templateBrowsers, t.rules.templateLaunchers, t.rules.templateMessengers]);
+
+  const handleDeletePreset = useCallback(() => {
+    const next = withoutPreset({ presets, activeId: activePresetId }, activePresetId);
+    onDeletePreset(activePresetId);
+    if (next.activeId === activePresetId) return;
+    const preset = next.presets.find(item => item.id === next.activeId);
+    if (preset) applyPresetRules(preset.rules);
+  }, [activePresetId, applyPresetRules, onDeletePreset, presets]);
+
+  const handleRenamePreset = useCallback((name: string) => {
+    onRenamePreset(activePresetId, name);
+  }, [activePresetId, onRenamePreset]);
+
+  if (!presetsReady) {
+    return (
+      <div className="page-content">
+        <div className="page-header">
+          <h2 className="page-title">{t.rules.title}</h2>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="page-content" ref={pageContentRef} onMouseUp={() => setIsBulkToggling(false)} onMouseLeave={() => setIsBulkToggling(false)}>
       <div className="page-header">
@@ -496,6 +570,16 @@ function RulesPage({ rules, setRules, tags, setTags, vpnEnabled, restartVPN, aut
       </div>
 
       <div className="container-narrow">
+        <PresetBar
+          presets={presets}
+          activePresetId={activePresetId}
+          canDelete={presets.length > 1}
+          onSelect={handleSelectPreset}
+          onCreate={handleCreatePreset}
+          onRename={handleRenamePreset}
+          onDelete={handleDeletePreset}
+          onAddTemplate={handleAddTemplate}
+        />
         <div className="panel">
           <div className="add-rule-form">
             <div className="add-rule-type-selector">

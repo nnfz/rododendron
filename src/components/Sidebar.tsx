@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { LuPower, LuShield, LuSettings, LuRefreshCcw } from 'react-icons/lu';
+import { LuCable, LuPower, LuShield, LuSettings, LuRefreshCcw } from 'react-icons/lu';
 import { useI18n } from '../i18n';
 import type { TabType } from '../types';
 
@@ -53,6 +53,15 @@ function Sidebar({
         >
           <LuPower size={18} strokeWidth={1.5} />
           <span>{t.sidebar.home}</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('connections')}
+          className={`nav-button ${activeTab === 'connections' ? 'active' : ''}`}
+          aria-current={activeTab === 'connections' ? 'page' : undefined}
+        >
+          <LuCable size={18} strokeWidth={1.5} />
+          <span>{t.sidebar.connections}</span>
         </button>
 
         <button

@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::net::{IpAddr, Ipv4Addr, ToSocketAddrs};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
@@ -33,6 +33,7 @@ const LOG_DIAG_LINES: usize = 10;
 
 static MIHOMO_PROCESS: Mutex<Option<Child>> = Mutex::new(None);
 static MIHOMO_PID: Mutex<Option<u32>> = Mutex::new(None);
+static RUNNING_CONFIG: Mutex<Option<String>> = Mutex::new(None);
 
 static CONTROLLER_CONFIG: LazyLock<Mutex<ControllerConfig>> = LazyLock::new(|| {
     Mutex::new(ControllerConfig {
@@ -354,11 +355,100 @@ fn get_mihomo_path(app: &AppHandle) -> PathBuf {
         .join(get_binary_name())
 }
 
-fn primary_config_dir(app: &AppHandle) -> PathBuf {
+pub(crate) fn primary_config_dir(app: &AppHandle) -> PathBuf {
     app.path()
         .app_config_dir()
         .or_else(|_| app.path().app_local_data_dir())
         .unwrap_or_else(|_| std::env::temp_dir().join("Rododendron"))
+}
+
+fn set_running_config(filename: Option<String>) {
+    if let Ok(mut guard) = RUNNING_CONFIG.lock() {
+        *guard = filename;
+    }
+}
+
+pub(crate) fn running_config_filename() -> Option<String> {
+    RUNNING_CONFIG.lock().ok().and_then(|guard| guard.clone())
+}
+
+pub(crate) async fn lock_vpn_lifecycle() -> tokio::sync::MutexGuard<'static, ()> {
+    VPN_LIFECYCLE.lock().await
+}
+
+fn profile_output_path(app: &AppHandle, filename: &str) -> PathBuf {
+    let dir = primary_config_dir(app);
+    if let Some(meta) = crate::subscription::load_meta_by_filename(&dir, filename) {
+        return crate::subscription::runtime_path(&dir, &meta.id);
+    }
+    dir.join(filename)
+}
+
+fn ensure_geodata_dir(app: &AppHandle) -> PathBuf {
+    let dest = primary_config_dir(app).join("geo");
+    let _ = fs::create_dir_all(&dest);
+    if let Ok(resource) = app.path().resource_dir() {
+        let bin = resource.join("bin");
+        for name in ["geoip.dat", "geosite.dat", "Country.mmdb"] {
+            copy_if_newer(&bin.join(name), &dest.join(name));
+        }
+    }
+    dest
+}
+
+fn copy_if_newer(source: &std::path::Path, dest: &std::path::Path) {
+    let Ok(source_meta) = fs::metadata(source) else {
+        return;
+    };
+    let replace = match fs::metadata(dest) {
+        Ok(dest_meta) => {
+            source_meta.len() != dest_meta.len()
+                || source_meta.modified().ok() > dest_meta.modified().ok()
+        }
+        Err(_) => true,
+    };
+    if replace {
+        let _ = fs::copy(source, dest);
+    }
+}
+
+pub(crate) async fn proxy_group_now(group_name: &str) -> Option<String> {
+    let encoded = urlencoding::encode(group_name);
+    let path = format!("/proxies/{encoded}");
+    let path_v1 = format!("/v1/proxies/{encoded}");
+    let value = mihomo_get_json_value(&[path.as_str(), path_v1.as_str()]).await.ok()?;
+    value
+        .get("now")
+        .and_then(|item| item.as_str())
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+}
+
+fn runtime_has_proxy(content: &str, name: &str) -> bool {
+    let Ok(yaml) = serde_yaml::from_str::<serde_yaml::Value>(content) else {
+        return false;
+    };
+    yaml.get("proxies")
+        .and_then(|value| value.as_sequence())
+        .is_some_and(|proxies| {
+            proxies.iter().any(|proxy| {
+                proxy.get("name").and_then(|item| item.as_str()) == Some(name)
+            })
+        })
+}
+
+async fn restore_subscription_selection(app: &AppHandle, filename: &str) {
+    let Some(meta) = crate::subscription::load_meta_by_filename(&primary_config_dir(app), filename) else {
+        return;
+    };
+    let decision = crate::subscription::decide_selection(
+        meta.selected_server_id.as_deref(),
+        meta.selected_hint.as_ref(),
+        &meta.nodes,
+    );
+    if let crate::subscription::SelectionDecision::Restore { name, .. } = decision {
+        let _ = switch_proxy_group(crate::subscription::USER_GROUP.to_string(), name).await;
+    }
 }
 
 fn get_pid_file_path(app: &AppHandle) -> PathBuf {
@@ -844,12 +934,9 @@ fn parse_rule_string(rule_str: &str) -> Option<ParsedRule> {
     })
 }
 
-fn build_rules_from_user_rules(user_rules: &[UserRule]) -> Vec<serde_yaml::Value> {
-    let mut rules = Vec::with_capacity(user_rules.len() + 1);
-    let mut any_active = false;
-
-    for rule in user_rules.iter().filter(|r| r.active) {
-        any_active = true;
+pub(crate) fn user_rule_lines(user_rules: &[UserRule]) -> Vec<String> {
+    let mut rules = Vec::new();
+    for rule in user_rules.iter().filter(|rule| rule.active) {
         let target = if rule.rule == "Via VPN" {
             "PROXY"
         } else {
@@ -862,9 +949,15 @@ fn build_rules_from_user_rules(user_rules: &[UserRule]) -> Vec<serde_yaml::Value
             "ip" => format!("IP-CIDR,{}/32,{}", rule.app, target),
             _ => format!("PROCESS-NAME,{},{}", rule.app, target),
         };
-        rules.push(serde_yaml::Value::String(rule_str));
+        rules.push(rule_str);
     }
+    rules
+}
 
+fn build_rules_from_user_rules(user_rules: &[UserRule]) -> Vec<serde_yaml::Value> {
+    let lines = user_rule_lines(user_rules);
+    let any_active = !lines.is_empty();
+    let mut rules: Vec<serde_yaml::Value> = lines.into_iter().map(serde_yaml::Value::String).collect();
     rules.push(serde_yaml::Value::String(
         if any_active {
             "MATCH,DIRECT"
@@ -878,7 +971,7 @@ fn build_rules_from_user_rules(user_rules: &[UserRule]) -> Vec<serde_yaml::Value
 
 // ─── Валидация конфига ───────────────────────────────────────────────────────
 
-fn validate_config(content: &str) -> Result<(), String> {
+pub(crate) fn validate_config(content: &str) -> Result<(), String> {
     let yaml: serde_yaml::Value =
         serde_yaml::from_str(content).map_err(|e| format!("Invalid YAML syntax: {}", e))?;
 
@@ -1467,6 +1560,20 @@ fn pin_resolved_hosts(root: &mut serde_yaml::Value, pins: &[(String, IpAddr)]) {
     }
 }
 
+pub(crate) fn prepare_runtime_config(content: &str) -> String {
+    let nic = physical_outbound_interface();
+    match nic.as_deref() {
+        Some(name) => info!("Binding proxy dials to {name}"),
+        None => warn!("No physical NIC found; proxy dials may re-enter TUN"),
+    }
+    prepare_runtime_config_with(content, nic.as_deref())
+}
+
+pub(crate) fn prepare_runtime_config_with(content: &str, nic: Option<&str>) -> String {
+    let pinned = pin_proxy_server_addresses(content);
+    bind_outbound_interface(&pinned, nic)
+}
+
 fn pin_proxy_server_addresses(content: &str) -> String {
     let Ok(mut yaml) = serde_yaml::from_str::<serde_yaml::Value>(content) else {
         return content.to_string();
@@ -1823,7 +1930,7 @@ fn merge_fake_ip_filter(dns: &mut serde_yaml::Mapping, domains: &[String]) -> bo
 
 /// Fills TUN, DNS and dialer keys that the pasted config did not set.
 /// Existing values are left alone so a later edit is not overwritten.
-fn apply_missing_defaults(root: &mut serde_yaml::Mapping) -> bool {
+pub(crate) fn apply_missing_defaults(root: &mut serde_yaml::Mapping) -> bool {
     let domains = proxy_server_domains(root);
     let mut changed = false;
 
@@ -2582,12 +2689,30 @@ fn config_tun_enabled(config_content: &str) -> bool {
         .unwrap_or(true)
 }
 
-#[tauri::command(rename_all = "camelCase")]
-pub fn generate_config(
+pub(crate) fn render_config(
     base_config: String,
     user_rules: Vec<UserRule>,
     network_interface: Option<String>,
     tun_mode: Option<bool>,
+    base_rules: Option<Vec<String>>,
+) -> Result<String, String> {
+    render_config_inner(
+        base_config,
+        user_rules,
+        network_interface,
+        tun_mode,
+        base_rules,
+        false,
+    )
+}
+
+fn render_config_inner(
+    base_config: String,
+    user_rules: Vec<UserRule>,
+    network_interface: Option<String>,
+    tun_mode: Option<bool>,
+    base_rules: Option<Vec<String>>,
+    replace_empty_rules: bool,
 ) -> Result<String, String> {
     let mut yaml: serde_yaml::Value =
         serde_yaml::from_str(&base_config).map_err(|e| format!("Failed to parse YAML: {}", e))?;
@@ -2606,7 +2731,13 @@ pub fn generate_config(
         }
     }
 
-    if !user_rules.is_empty() {
+    if let Some(base_rules) = base_rules {
+        let composed = crate::subscription::compose_subscription_rules(
+            &user_rule_lines(&user_rules),
+            &base_rules,
+        );
+        crate::subscription::write_composed_rules(&mut yaml, &composed);
+    } else if replace_empty_rules || !user_rules.is_empty() {
         yaml["rules"] = serde_yaml::Value::Sequence(build_rules_from_user_rules(&user_rules));
     }
 
@@ -2619,6 +2750,29 @@ pub fn generate_config(
     ensure_tun_dns(&mut yaml);
 
     serde_yaml::to_string(&yaml).map_err(|e| format!("Failed to serialize YAML: {}", e))
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn generate_config(
+    app: AppHandle,
+    base_config: String,
+    user_rules: Vec<UserRule>,
+    network_interface: Option<String>,
+    tun_mode: Option<bool>,
+    config_filename: Option<String>,
+) -> Result<String, String> {
+    let base_rules = config_filename.as_deref().and_then(|filename| {
+        crate::subscription::load_meta_by_filename(&primary_config_dir(&app), filename)
+            .map(|meta| meta.base_rules)
+    });
+    render_config_inner(
+        base_config,
+        user_rules,
+        network_interface,
+        tun_mode,
+        base_rules,
+        true,
+    )
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -2635,6 +2789,11 @@ pub async fn import_config(
     }
 
     let apply_defaults = apply_defaults.unwrap_or(true);
+    tracing::info!(
+        "import_config: {filename}, {} bytes, apply_defaults={apply_defaults}, target={}",
+        config_content.len(),
+        config_path.display()
+    );
 
     let content_to_write = match serde_yaml::from_str::<serde_yaml::Value>(&config_content) {
         Ok(mut yaml) => {
@@ -2666,12 +2825,41 @@ pub async fn import_config(
                 config_content
             }
         }
-        Err(_) => config_content,
+        Err(err) => {
+            tracing::warn!("import_config: {filename} is not valid YAML, saving as is: {err}");
+            config_content
+        }
     };
 
-    fs::write(&config_path, &content_to_write)
-        .map_err(|e| format!("Failed to save config: {}", e))?;
+    fs::write(&config_path, &content_to_write).map_err(|e| {
+        tracing::warn!("import_config: could not write {}: {e}", config_path.display());
+        format!("Failed to save config: {}", e)
+    })?;
+    tracing::info!("import_config: saved {filename} ({} bytes)", content_to_write.len());
     Ok(config_path.to_string_lossy().to_string())
+}
+
+fn save_subscription_rules(
+    dir: &std::path::Path,
+    filename: &str,
+    user_rules: &[UserRule],
+    meta: &mut crate::subscription::SubscriptionMeta,
+) -> Result<(), String> {
+    let config_path = dir.join(filename);
+    backup_config(&config_path)?;
+    let content = fs::read_to_string(&config_path)
+        .map_err(|err| format!("Failed to read config: {err}"))?;
+    let mut yaml: serde_yaml::Value = serde_yaml::from_str(&content)
+        .map_err(|err| format!("Failed to parse YAML: {err}"))?;
+    let lines = user_rule_lines(user_rules);
+    meta.user_rule_lines = lines.clone();
+    let composed = crate::subscription::compose_subscription_rules(&lines, &meta.base_rules);
+    crate::subscription::write_composed_rules(&mut yaml, &composed);
+    let new_content = serde_yaml::to_string(&yaml)
+        .map_err(|err| format!("Failed to serialize YAML: {err}"))?;
+    fs::write(&config_path, new_content)
+        .map_err(|err| format!("Failed to write config: {err}"))?;
+    crate::subscription::save_meta(dir, meta)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -2680,8 +2868,9 @@ pub async fn save_rules_to_config(
     filename: String,
     user_rules: Vec<UserRule>,
 ) -> Result<(), String> {
-    if user_rules.is_empty() {
-        return Ok(());
+    let dir = primary_config_dir(&app);
+    if let Some(mut meta) = crate::subscription::load_meta_by_filename(&dir, &filename) {
+        return save_subscription_rules(&dir, &filename, &user_rules, &mut meta);
     }
 
     let config_path = find_existing_config_path(&app, &filename)
@@ -2705,11 +2894,15 @@ pub async fn save_rules_to_config(
 
 #[tauri::command(rename_all = "camelCase")]
 pub async fn save_rules_to_path(path: String, user_rules: Vec<UserRule>) -> Result<(), String> {
-    if user_rules.is_empty() {
-        return Ok(());
-    }
-
     let config_path = PathBuf::from(&path);
+    if let (Some(parent), Some(name)) = (
+        config_path.parent(),
+        config_path.file_name().and_then(|value| value.to_str()),
+    ) {
+        if let Some(mut meta) = crate::subscription::load_meta_by_filename(parent, name) {
+            return save_subscription_rules(parent, name, &user_rules, &mut meta);
+        }
+    }
 
     backup_config(&config_path)?;
 
@@ -2774,7 +2967,6 @@ pub async fn start_vpn(
     let config_dir = primary_config_dir(&app);
     fs::create_dir_all(&config_dir).map_err(|e| format!("Failed to create config dir: {}", e))?;
 
-    let config_path = config_dir.join(&config_filename);
     let log_path = config_dir.join("mihomo.log");
 
     rotate_log_file(&log_path);
@@ -2789,25 +2981,22 @@ pub async fn start_vpn(
         return Err("VPN stop requested".to_string());
     }
 
-    let config_content = tokio::task::spawn_blocking(move || {
-        let pinned = pin_proxy_server_addresses(&config_content);
-        let nic = physical_outbound_interface();
-        match nic.as_deref() {
-            Some(name) => info!("Binding proxy dials to {name}"),
-            None => warn!("No physical NIC found; proxy dials may re-enter TUN"),
-        }
-        bind_outbound_interface(&pinned, nic.as_deref())
-    })
-    .await
-    .map_err(|err| format!("Failed to resolve proxy server: {err}"))?;
-    fs::write(&config_path, &config_content)
+    set_running_config(None);
+    let config_content = tokio::task::spawn_blocking(move || prepare_runtime_config(&config_content))
+        .await
+        .map_err(|err| format!("Failed to resolve proxy server: {err}"))?;
+    let output_path = profile_output_path(&app, &config_filename);
+    fs::write(&output_path, &config_content)
         .map_err(|e| format!("Failed to write config: {}", e))?;
 
     let mihomo_path = get_mihomo_path(&app);
+    let geodata_dir = ensure_geodata_dir(&app);
 
     let mut cmd = Command::new(mihomo_path);
-    cmd.arg("-f")
-        .arg(&config_path)
+    cmd.arg("-d")
+        .arg(&geodata_dir)
+        .arg("-f")
+        .arg(&output_path)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
@@ -2883,6 +3072,9 @@ pub async fn start_vpn(
         return Err("VPN stop requested".to_string());
     }
 
+    restore_subscription_selection(&app, &config_filename).await;
+    set_running_config(Some(config_filename));
+
     let parsed = parse_config(config_content)?;
     Ok(VpnStatus {
         running: true,
@@ -2891,6 +3083,57 @@ pub async fn start_vpn(
         mode: parsed.mode,
         port: parsed.mixed_port,
     })
+}
+
+/// `PUT /configs?force=true` with the config inline.
+///
+/// Mihomo 1.19+ answers 400 when `path` is outside the `-d` directory.
+/// `/v1/configs` is not a controller route; falling back to it hides that 400 as a 404.
+pub(crate) fn reload_config_call(config_content: &str) -> (&'static str, serde_json::Value) {
+    (
+        "/configs?force=true",
+        serde_json::json!({ "payload": config_content }),
+    )
+}
+
+/// Counts and flags only. Rule targets, proxy secrets, and interface names stay out of the log.
+fn config_reload_summary(content: &str) -> String {
+    let Ok(yaml) = serde_yaml::from_str::<serde_yaml::Value>(content) else {
+        return "yaml=unparsed".to_string();
+    };
+    let rules = yaml.get("rules").and_then(|value| value.as_sequence());
+    let count = rules.map(|seq| seq.len()).unwrap_or(0);
+    let terminal = rules
+        .and_then(|seq| seq.last())
+        .and_then(|value| value.as_str())
+        .filter(|line| {
+            let head = line.split(',').next().unwrap_or("").trim();
+            head.eq_ignore_ascii_case("MATCH")
+        })
+        .map(|line| {
+            let policy = line.split(',').nth(1).unwrap_or("").trim();
+            format!("MATCH,{policy}")
+        })
+        .unwrap_or_else(|| "other".to_string());
+    let sub_rules = yaml
+        .get("sub-rules")
+        .and_then(|value| value.as_mapping())
+        .map(|map| map.len())
+        .unwrap_or(0);
+    let exclude = yaml
+        .get("tun")
+        .and_then(|tun| tun.get("route-exclude-address"))
+        .and_then(|value| value.as_sequence())
+        .map(|seq| seq.len())
+        .unwrap_or(0);
+    let interface = yaml
+        .get("interface-name")
+        .and_then(|value| value.as_str())
+        .is_some_and(|name| !name.trim().is_empty());
+    format!(
+        "rules={count} terminal={terminal} sub_rules={sub_rules} tun={} interface={interface} route_exclude={exclude}",
+        tun_is_enabled(&yaml)
+    )
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -2906,23 +3149,35 @@ pub async fn reload_mihomo_config(
         }
     }
 
-    let config_dir = primary_config_dir(&app);
-    fs::create_dir_all(&config_dir).map_err(|e| format!("Failed to create config dir: {}", e))?;
-
-    let config_path = config_dir.join(&config_filename);
-    fs::write(&config_path, &config_content)
+    let keep_now = proxy_group_now("PROXY").await;
+    let filename = config_filename.clone();
+    let app_for_path = app.clone();
+    let prepared = tokio::task::spawn_blocking(move || prepare_runtime_config(&config_content))
+        .await
+        .map_err(|err| format!("Failed to prepare runtime config: {err}"))?;
+    let output_path = profile_output_path(&app_for_path, &filename);
+    if let Some(parent) = output_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("Failed to create config dir: {}", e))?;
+    }
+    fs::write(&output_path, &prepared)
         .map_err(|e| format!("Failed to write config: {}", e))?;
 
-    let config_path_str = config_path.to_string_lossy().to_string();
+    info!("Mihomo reload starting: {}", config_reload_summary(&prepared));
+    let (path, body) = reload_config_call(&prepared);
+    match mihomo_request(reqwest::Method::PUT, &[path], Some(&body)).await {
+        Ok(resp) => info!("Mihomo reload accepted: HTTP {}", resp.status()),
+        Err(err) => {
+            warn!("Mihomo reload failed: {err}");
+            return Err(err);
+        }
+    }
 
-    mihomo_request(
-        reqwest::Method::PUT,
-        &["/configs?force=true", "/v1/configs?force=true"],
-        Some(&serde_json::json!({ "path": config_path_str })),
-    )
-    .await?;
-
-    update_controller_config(&config_content);
+    update_controller_config(&prepared);
+    if let Some(now) = keep_now {
+        if runtime_has_proxy(&prepared, &now) {
+            let _ = switch_proxy_group("PROXY".to_string(), now).await;
+        }
+    }
     Ok(())
 }
 
@@ -2976,6 +3231,7 @@ pub async fn stop_vpn(app: AppHandle) -> Result<VpnStatus, String> {
     // Очищаем кеш API
     crate::api_cache::clear_cache();
 
+    set_running_config(None);
     info!("VPN stopped successfully");
 
     Ok(VpnStatus {
@@ -3194,8 +3450,130 @@ pub fn read_config(app: AppHandle, filename: String) -> Result<String, String> {
     ))
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenamedConfig {
+    pub filename: String,
+    pub title: String,
+    pub subscription: bool,
+}
+
+pub(crate) fn normalize_display_title(title: &str) -> Result<String, String> {
+    let title = title.trim();
+    let len = title.chars().count();
+    if title.is_empty() || len > 80 || title.chars().any(|ch| ch.is_control()) {
+        return Err("Invalid name".to_string());
+    }
+    Ok(title.to_string())
+}
+
+fn strip_yaml_suffix(name: &str) -> &str {
+    let lower = name.to_ascii_lowercase();
+    if lower.ends_with(".yaml") && name.len() > 5 {
+        return &name[..name.len() - 5];
+    }
+    if lower.ends_with(".yml") && name.len() > 4 {
+        return &name[..name.len() - 4];
+    }
+    name
+}
+
+pub(crate) fn sanitized_profile_filename(current_filename: &str, requested_name: &str) -> Result<String, String> {
+    let requested = normalize_display_title(requested_name)?;
+    if requested.contains(['/', '\\']) {
+        return Err("Invalid name".to_string());
+    }
+    let ext = Path::new(current_filename)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .filter(|ext| ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml"))
+        .unwrap_or("yaml");
+    let stem = strip_yaml_suffix(&requested);
+    let cleaned: String = stem
+        .chars()
+        .map(|ch| if "\\/:*?\"<>|".contains(ch) { '-' } else { ch })
+        .collect();
+    let cleaned = cleaned.trim().trim_matches('.').trim();
+    if cleaned.is_empty() || cleaned == "." || cleaned == ".." {
+        return Err("Invalid name".to_string());
+    }
+    Ok(format!("{cleaned}.{ext}"))
+}
+
+pub(crate) fn move_profile_file(current: &Path, new_filename: &str) -> Result<(), String> {
+    if new_filename.contains(['/', '\\']) || new_filename.trim().is_empty() {
+        return Err("Invalid profile filename".to_string());
+    }
+    let Some(parent) = current.parent() else {
+        return Err("Invalid profile path".to_string());
+    };
+    let target = parent.join(new_filename);
+    if target.exists() {
+        return Err("A config with this name already exists".to_string());
+    }
+    fs::rename(current, &target).map_err(|err| format!("Failed to rename config: {err}"))?;
+    let backup = current.with_extension("yml.bak");
+    if backup.exists() {
+        let new_backup = target.with_extension("yml.bak");
+        if new_backup.exists() {
+            let _ = fs::remove_file(&new_backup);
+        }
+        let _ = fs::rename(&backup, &new_backup);
+    }
+    Ok(())
+}
+
+pub(crate) fn renamed_running_filename(running: Option<&str>, old_filename: &str, new_filename: &str) -> Option<String> {
+    if running == Some(old_filename) && old_filename != new_filename {
+        Some(new_filename.to_string())
+    } else {
+        None
+    }
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn rename_config(app: AppHandle, filename: String, name: String) -> Result<RenamedConfig, String> {
+    let primary = primary_config_dir(&app);
+    if crate::subscription::load_meta_by_filename(&primary, &filename).is_some() {
+        let title = crate::subscription::rename_subscription_title(&primary, &filename, &name)?;
+        return Ok(RenamedConfig {
+            filename,
+            title,
+            subscription: true,
+        });
+    }
+    let new_filename = sanitized_profile_filename(&filename, &name)?;
+    let title = Path::new(&new_filename)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or(&new_filename)
+        .to_string();
+    if new_filename == filename {
+        return Ok(RenamedConfig {
+            filename,
+            title,
+            subscription: false,
+        });
+    }
+    if find_existing_config_path(&app, &new_filename).is_some() {
+        return Err("A config with this name already exists".to_string());
+    }
+    let current = find_existing_config_path(&app, &filename)
+        .ok_or_else(|| format!("Config file not found: {filename}"))?;
+    move_profile_file(&current, &new_filename)?;
+    if let Some(updated) = renamed_running_filename(running_config_filename().as_deref(), &filename, &new_filename) {
+        set_running_config(Some(updated));
+    }
+    Ok(RenamedConfig {
+        filename: new_filename,
+        title,
+        subscription: false,
+    })
+}
+
 #[tauri::command]
 pub fn delete_config(app: AppHandle, filename: String) -> Result<(), String> {
+    let dir = primary_config_dir(&app);
     if let Some(config_path) = find_existing_config_path(&app, &filename) {
         // Удаляем и бэкап если есть
         let backup = config_path.with_extension("yml.bak");
@@ -3203,15 +3581,59 @@ pub fn delete_config(app: AppHandle, filename: String) -> Result<(), String> {
             let _ = fs::remove_file(&backup);
         }
 
-        return fs::remove_file(&config_path)
-            .map_err(|e| format!("Failed to delete config {}: {}", filename, e));
+        fs::remove_file(&config_path)
+            .map_err(|e| format!("Failed to delete config {}: {}", filename, e))?;
     }
+    crate::subscription::remove_subscription_files(&dir, &filename);
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::apply_missing_defaults;
+    use super::{
+        apply_missing_defaults, move_profile_file, renamed_running_filename, sanitized_profile_filename,
+    };
+    use std::fs;
+
+    #[test]
+    fn sanitized_profile_filename_keeps_extension_and_rejects_separators() {
+        assert_eq!(sanitized_profile_filename("old.yaml", "My Config").unwrap(), "My Config.yaml");
+        assert_eq!(sanitized_profile_filename("old.yml", "My Config.yaml").unwrap(), "My Config.yml");
+        assert_eq!(sanitized_profile_filename("old.yaml", "a:b").unwrap(), "a-b.yaml");
+        assert!(sanitized_profile_filename("old.yaml", "a/b").is_err());
+        assert!(sanitized_profile_filename("old.yaml", " ").is_err());
+        assert!(sanitized_profile_filename("old.yaml", "..").is_err());
+    }
+
+    #[test]
+    fn move_profile_file_moves_yaml_and_backup_and_keeps_the_source_on_collision() {
+        let dir = std::env::temp_dir().join(format!(
+            "rododendron-rename-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("a.yaml");
+        fs::write(&source, "profile").unwrap();
+        fs::write(dir.join("a.yml.bak"), "backup").unwrap();
+        move_profile_file(&source, "b.yaml").unwrap();
+        assert!(!source.exists());
+        assert_eq!(fs::read_to_string(dir.join("b.yaml")).unwrap(), "profile");
+        assert_eq!(fs::read_to_string(dir.join("b.yml.bak")).unwrap(), "backup");
+        assert!(!dir.join("a.yml.bak").exists());
+        fs::write(&source, "still-here").unwrap();
+        assert!(move_profile_file(&source, "b.yaml").is_err());
+        assert_eq!(fs::read_to_string(&source).unwrap(), "still-here");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn renamed_running_filename_tracks_only_the_renamed_profile() {
+        assert_eq!(renamed_running_filename(Some("a.yaml"), "a.yaml", "b.yaml").as_deref(), Some("b.yaml"));
+        assert_eq!(renamed_running_filename(Some("other.yaml"), "a.yaml", "b.yaml"), None);
+        assert_eq!(renamed_running_filename(Some("a.yaml"), "a.yaml", "a.yaml"), None);
+        assert_eq!(renamed_running_filename(None, "a.yaml", "b.yaml"), None);
+    }
 
     fn mapping_from(yaml: &str) -> serde_yaml::Mapping {
         let value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
@@ -3344,7 +3766,7 @@ proxies:
     server: example.com
     port: 443
 "#;
-        let out = super::generate_config(yaml.to_string(), Vec::new(), None, None).unwrap();
+        let out = super::render_config(yaml.to_string(), Vec::new(), None, None, None).unwrap();
         let parsed: serde_yaml::Value = serde_yaml::from_str(&out).unwrap();
         assert_eq!(parsed["ipv6"].as_bool(), Some(true));
         assert_eq!(parsed["tun"]["dns-mode"].as_str(), Some("hijack"));
@@ -3379,7 +3801,7 @@ dns:
     - 9.9.9.9
   proxy-server-nameserver: []
 "#;
-        let out = super::generate_config(yaml.to_string(), Vec::new(), None, None).unwrap();
+        let out = super::render_config(yaml.to_string(), Vec::new(), None, None, None).unwrap();
         let parsed: serde_yaml::Value = serde_yaml::from_str(&out).unwrap();
         assert_eq!(parsed["tun"]["enable"].as_bool(), Some(false));
         assert_eq!(parsed["tun"]["dns-mode"].as_str(), Some("disabled"));
@@ -3401,7 +3823,7 @@ dns:
   nameserver:
     - https://1.1.1.1/dns-query
 "#;
-        let out = super::generate_config(yaml.to_string(), Vec::new(), None, Some(false)).unwrap();
+        let out = super::render_config(yaml.to_string(), Vec::new(), None, Some(false), None).unwrap();
         let parsed: serde_yaml::Value = serde_yaml::from_str(&out).unwrap();
         assert_eq!(parsed["tun"]["enable"].as_bool(), Some(false));
         assert_eq!(parsed["tun"]["stack"].as_str(), Some("mixed"));
@@ -3419,7 +3841,7 @@ dns:
   proxy-server-nameserver:
     - 1.1.1.1
 "#;
-        let out = super::generate_config(yaml.to_string(), Vec::new(), None, Some(true)).unwrap();
+        let out = super::render_config(yaml.to_string(), Vec::new(), None, Some(true), None).unwrap();
         let parsed: serde_yaml::Value = serde_yaml::from_str(&out).unwrap();
         assert_eq!(parsed["tun"]["enable"].as_bool(), Some(true));
         assert_eq!(parsed["tun"]["dns-mode"].as_str(), Some("hijack"));
@@ -3541,10 +3963,11 @@ rododendron-auto-interface: true
 tun:
   enable: true
 "#;
-        let out = super::generate_config(
+        let out = super::render_config(
             yaml.to_string(),
             Vec::new(),
             Some("Ethernet".to_string()),
+            None,
             None,
         )
         .unwrap();
@@ -3653,7 +4076,7 @@ proxies:
     type: vless
     packet-encoding: xudp
 "#;
-        let out = super::generate_config(yaml.to_string(), Vec::new(), None, None).unwrap();
+        let out = super::render_config(yaml.to_string(), Vec::new(), None, None, None).unwrap();
         let parsed: serde_yaml::Value = serde_yaml::from_str(&out).unwrap();
         assert_eq!(
             parsed["proxies"][0]["encryption"].as_str(),
@@ -3691,7 +4114,7 @@ proxies:
       spider-x: "/other"
       support-x25519mlkem768: true
 "#;
-        let out = super::generate_config(yaml.to_string(), Vec::new(), None, None).unwrap();
+        let out = super::render_config(yaml.to_string(), Vec::new(), None, None, None).unwrap();
         let parsed: serde_yaml::Value = serde_yaml::from_str(&out).unwrap();
         let first = &parsed["proxies"][0]["reality-opts"];
         assert!(first.get("support-x25519mlkem768").is_none());
@@ -3740,7 +4163,7 @@ proxies:
     server: 1.2.3.4
     port: 443
 "#;
-        let out = super::generate_config(yaml.to_string(), Vec::new(), None, None).unwrap();
+        let out = super::render_config(yaml.to_string(), Vec::new(), None, None, None).unwrap();
         let parsed: serde_yaml::Value = serde_yaml::from_str(&out).unwrap();
         // REALITY без fingerprint — должен получить chrome
         assert_eq!(
@@ -3778,7 +4201,7 @@ proxies:
     port: 443
     network: ws
 "#;
-        let out = super::generate_config(yaml.to_string(), Vec::new(), None, None).unwrap();
+        let out = super::render_config(yaml.to_string(), Vec::new(), None, None, None).unwrap();
         let parsed: serde_yaml::Value = serde_yaml::from_str(&out).unwrap();
         // xhttp без opts — должен получить пустой маппинг
         assert!(parsed["proxies"][0].get("xhttp-opts").is_some());
@@ -3833,5 +4256,270 @@ proxies:
       short-id: "00"
 "#;
         assert!(super::validate_config(yaml).is_ok());
+    }
+
+    #[test]
+    fn render_config_local_rules_still_end_with_match_direct() {
+        let yaml = "proxies:\n  - name: a\n    type: ss\n    server: 1.1.1.1\n    port: 1\n";
+        let rules = vec![super::UserRule {
+            id: 1,
+            app: "chrome.exe".to_string(),
+            rule: "Via VPN".to_string(),
+            active: true,
+            rule_type: "process".to_string(),
+        }];
+        let out = super::render_config(yaml.to_string(), rules, None, None, None).unwrap();
+        let parsed: serde_yaml::Value = serde_yaml::from_str(&out).unwrap();
+        let rules = parsed["rules"].as_sequence().unwrap();
+        assert_eq!(rules[0].as_str(), Some("PROCESS-NAME,chrome.exe,PROXY"));
+        assert_eq!(rules.last().and_then(|rule| rule.as_str()), Some("MATCH,DIRECT"));
+        assert!(parsed.get("sub-rules").is_none());
+        assert!(parsed.get("find-process-mode").is_none());
+    }
+
+    #[test]
+    fn render_config_without_user_rules_sends_everything_through_the_proxy() {
+        let yaml = "proxies:\n  - name: a\n    type: ss\n    server: 1.1.1.1\n    port: 1\nrules:\n  - DOMAIN,example.com,DIRECT\n  - MATCH,DIRECT\n";
+        let out = super::render_config_inner(yaml.to_string(), Vec::new(), None, None, None, true).unwrap();
+        let parsed: serde_yaml::Value = serde_yaml::from_str(&out).unwrap();
+        let rules = parsed["rules"].as_sequence().unwrap();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].as_str(), Some("MATCH,PROXY"));
+    }
+
+    fn user_rule(id: i64, app: &str, action: &str, rule_type: &str, active: bool) -> super::UserRule {
+        super::UserRule {
+            id,
+            app: app.to_string(),
+            rule: action.to_string(),
+            active,
+            rule_type: rule_type.to_string(),
+        }
+    }
+
+    fn yaml_rules(parsed: &serde_yaml::Value) -> Vec<String> {
+        parsed["rules"]
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .map(|rule| rule.as_str().unwrap().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn render_config_routes_chrome_through_proxy_and_keeps_provider_rules_in_sub_rules() {
+        let yaml = "proxies:\n  - name: a\n    type: ss\n    server: 1.1.1.1\n    port: 1\n";
+        let rules = vec![
+            user_rule(1, "chrome.exe", "Via VPN", "process", true),
+            user_rule(2, "example.com", "Via VPN", "domain", true),
+            user_rule(3, "example", "Direct", "domain_keyword", true),
+            user_rule(4, "msedge.exe", "Direct", "process", true),
+        ];
+        let out = super::render_config(
+            yaml.to_string(),
+            rules,
+            None,
+            None,
+            Some(vec![
+                "GEOSITE,category-ads,REJECT".to_string(),
+                "MATCH,Subscription".to_string(),
+            ]),
+        )
+        .unwrap();
+        let parsed: serde_yaml::Value = serde_yaml::from_str(&out).unwrap();
+        assert_eq!(
+            yaml_rules(&parsed),
+            vec![
+                "DOMAIN,example.com,PROXY".to_string(),
+                "DOMAIN-KEYWORD,example,DIRECT".to_string(),
+                "PROCESS-NAME,msedge.exe,DIRECT".to_string(),
+                "SUB-RULE,(PROCESS-NAME,chrome.exe),rododendron-subscription".to_string(),
+                "MATCH,DIRECT".to_string(),
+            ]
+        );
+        let sub = &parsed["sub-rules"]["rododendron-subscription"];
+        assert_eq!(sub[0].as_str(), Some("GEOSITE,category-ads,REJECT"));
+        assert_eq!(sub[1].as_str(), Some("MATCH,Subscription"));
+        assert!(parsed.get("find-process-mode").is_none());
+    }
+
+    #[test]
+    fn render_config_link_list_chrome_rule_leaves_other_apps_direct() {
+        let yaml = "proxies:\n  - name: a\n    type: ss\n    server: 1.1.1.1\n    port: 1\nrules:\n  - MATCH,PROXY\n";
+        let out = super::render_config(
+            yaml.to_string(),
+            vec![user_rule(1, "chrome.exe", "Via VPN", "process", true)],
+            None,
+            None,
+            Some(vec!["MATCH,PROXY".to_string()]),
+        )
+        .unwrap();
+        let parsed: serde_yaml::Value = serde_yaml::from_str(&out).unwrap();
+        assert_eq!(
+            yaml_rules(&parsed),
+            vec![
+                "PROCESS-NAME,chrome.exe,PROXY".to_string(),
+                "MATCH,DIRECT".to_string(),
+            ]
+        );
+        assert!(parsed.get("sub-rules").is_none());
+        assert!(parsed.get("find-process-mode").is_none());
+    }
+
+    #[test]
+    fn render_config_without_active_user_rules_keeps_the_provider_match() {
+        let yaml = "proxies:\n  - name: a\n    type: ss\n    server: 1.1.1.1\n    port: 1\n";
+        let out = super::render_config(
+            yaml.to_string(),
+            vec![user_rule(1, "chrome.exe", "Via VPN", "process", false)],
+            None,
+            None,
+            Some(vec!["MATCH,PROXY".to_string()]),
+        )
+        .unwrap();
+        let parsed: serde_yaml::Value = serde_yaml::from_str(&out).unwrap();
+        assert_eq!(yaml_rules(&parsed), vec!["MATCH,PROXY".to_string()]);
+        assert!(parsed.get("sub-rules").is_none());
+    }
+
+    #[test]
+    fn render_config_clears_our_sub_rule_when_user_rules_are_removed() {
+        let yaml = r#"
+proxies:
+  - name: a
+    type: ss
+    server: 1.1.1.1
+    port: 1
+rules:
+  - SUB-RULE,(PROCESS-NAME,chrome.exe),rododendron-subscription
+  - MATCH,DIRECT
+sub-rules:
+  rododendron-subscription:
+    - GEOSITE,category-ads,REJECT
+    - MATCH,PROXY
+  kept:
+    - MATCH,DIRECT
+"#;
+        let out = super::render_config(
+            yaml.to_string(),
+            Vec::new(),
+            None,
+            None,
+            Some(vec![
+                "GEOSITE,category-ads,REJECT".to_string(),
+                "MATCH,PROXY".to_string(),
+            ]),
+        )
+        .unwrap();
+        let parsed: serde_yaml::Value = serde_yaml::from_str(&out).unwrap();
+        assert_eq!(
+            yaml_rules(&parsed),
+            vec![
+                "GEOSITE,category-ads,REJECT".to_string(),
+                "MATCH,PROXY".to_string(),
+            ]
+        );
+        assert!(parsed["sub-rules"].get("rododendron-subscription").is_none());
+        assert_eq!(parsed["sub-rules"]["kept"][0].as_str(), Some("MATCH,DIRECT"));
+        assert!(parsed.get("find-process-mode").is_none());
+    }
+
+    #[test]
+    fn prepare_runtime_keeps_user_hosts_and_explicit_interface() {
+        let yaml = r#"
+proxies:
+  - name: a
+    type: ss
+    server: 1.2.3.4
+    port: 443
+hosts:
+  example.com: 9.9.9.9
+interface-name: MyNic
+tun:
+  enable: true
+"#;
+        let out = super::prepare_runtime_config_with(yaml, Some("OtherNic"));
+        let parsed: serde_yaml::Value = serde_yaml::from_str(&out).unwrap();
+        assert_eq!(parsed["interface-name"].as_str(), Some("MyNic"));
+        assert_eq!(parsed["hosts"]["example.com"].as_str(), Some("9.9.9.9"));
+        assert!(parsed.get(super::AUTO_INTERFACE_KEY).is_none());
+    }
+
+    #[test]
+    fn prepare_runtime_binds_the_physical_interface_when_it_is_automatic() {
+        let yaml = r#"
+proxies:
+  - name: a
+    type: ss
+    server: 1.2.3.4
+    port: 443
+tun:
+  enable: true
+"#;
+        let out = super::prepare_runtime_config_with(yaml, Some("Ethernet"));
+        let parsed: serde_yaml::Value = serde_yaml::from_str(&out).unwrap();
+        assert_eq!(parsed["interface-name"].as_str(), Some("Ethernet"));
+        assert_eq!(parsed[super::AUTO_INTERFACE_KEY].as_bool(), Some(true));
+    }
+
+    #[test]
+    fn runtime_pin_keeps_an_existing_host_and_adds_the_new_one() {
+        let mut yaml: serde_yaml::Value = serde_yaml::from_str(
+            "tun:\n  enable: true\nhosts:\n  kept.example: 9.9.9.9\n",
+        )
+        .unwrap();
+        super::pin_resolved_hosts(
+            &mut yaml,
+            &[
+                ("kept.example".to_string(), "9.9.9.9".parse().unwrap()),
+                ("new.example".to_string(), "1.1.1.1".parse().unwrap()),
+            ],
+        );
+        assert_eq!(yaml["hosts"]["kept.example"].as_str(), Some("9.9.9.9"));
+        assert_eq!(yaml["hosts"]["new.example"].as_str(), Some("1.1.1.1"));
+        let excluded = yaml["tun"]["route-exclude-address"].as_sequence().unwrap();
+        assert!(excluded.iter().any(|item| item.as_str() == Some("9.9.9.9/32")));
+        assert!(excluded.iter().any(|item| item.as_str() == Some("1.1.1.1/32")));
+    }
+
+    #[test]
+    fn manual_subscription_refresh_reloads_with_inline_payload() {
+        let config = "mode: rule\nrules:\n  - MATCH,PROXY\n";
+        let (path, body) = super::reload_config_call(config);
+        assert_eq!(path, "/configs?force=true");
+        assert!(!path.contains("/v1/"));
+        assert!(body.get("path").is_none());
+        assert_eq!(body.get("payload").and_then(|value| value.as_str()), Some(config));
+    }
+
+    #[test]
+    fn config_reload_summary_counts_flags_without_secrets() {
+        let yaml = r#"
+interface-name: Ethernet 2
+proxies:
+  - name: secret-node
+    type: vless
+    uuid: 11111111-2222-3333-4444-555555555555
+    password: super-secret
+rules:
+  - PROCESS-NAME,chrome.exe,PROXY
+  - MATCH,DIRECT
+sub-rules:
+  rododendron-subscription:
+    - MATCH,PROXY
+tun:
+  enable: true
+  route-exclude-address:
+    - 203.0.113.10/32
+"#;
+        let summary = super::config_reload_summary(yaml);
+        assert_eq!(
+            summary,
+            "rules=2 terminal=MATCH,DIRECT sub_rules=1 tun=true interface=true route_exclude=1"
+        );
+        assert!(!summary.contains("chrome"));
+        assert!(!summary.contains("secret"));
+        assert!(!summary.contains("Ethernet"));
+        assert!(!summary.contains("203.0.113.10"));
     }
 }

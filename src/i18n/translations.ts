@@ -3,6 +3,7 @@ export type Translations = {
     title: string;
     subtitle: string;
     home: string;
+    connections: string;
     rules: string;
     settings: string;
     status: string;
@@ -23,6 +24,18 @@ export type Translations = {
   };
   rules: {
     title: string;
+    preset: string;
+    presetsHelp: string;
+    defaultPreset: string;
+    newPreset: string;
+    renamePreset: string;
+    deletePreset: string;
+    confirmDeletePreset: string;
+    templates: string;
+    templateBrowsers: string;
+    templateMessengers: string;
+    templateLaunchers: string;
+    presetName: string;
     addRule: string;
     exportToConfig: string;
     exportToConfigHelp: string;
@@ -84,6 +97,13 @@ export type Translations = {
     editConfig: string;
     mainSettings: string;
     importurl: string;
+    subscription: string;
+    subscriptionUrl: string;
+    subscriptionName: string;
+    subscriptionAdd: string;
+    subscriptionRefresh: string;
+    subscriptionUpdated: string;
+    subscriptionUserinfo: string;
     autoCheckUpdates: string;
     autoRestartOnRuleApply: string;
     autoConnect: string;
@@ -149,6 +169,40 @@ export type Translations = {
       fieldHelp: Record<string, string>;
     };
   };
+  connections: {
+    title: string;
+    add: string;
+    typeSubscription: string;
+    typeLocal: string;
+    serverCount: string;
+    rename: string;
+    updateSubscription: string;
+    subscriptionUpdatedNotice: string;
+    addTitle: string;
+    addPlaceholder: string;
+    availableServers: string;
+    settings: string;
+    expand: string;
+    collapse: string;
+    fieldName: string;
+    fieldLink: string;
+    fieldInterval: string;
+    intervalPlaceholder: string;
+    intervalHint: string;
+    intervalInvalid: string;
+    information: string;
+    emptyTitle: string;
+    emptyHint: string;
+    servers: string;
+    back: string;
+    filename: string;
+    renameTitle: string;
+    addSubscriptionTitle: string;
+    selected: string;
+    actions: string;
+    deleteTitle: string;
+    deleteBody: string;
+  };
   logs: {
     title: string;
     export: string;
@@ -158,6 +212,7 @@ export type Translations = {
     addConfigTitle: string;
     addConfigSubtitle: string;
     openSettings: string;
+    openConnections: string;
     continueWithoutConfig: string;
   };
   common: {
@@ -179,6 +234,7 @@ export const translations: Record<Language, Translations> = {
       title: 'Rododendron',
       subtitle: 'nnfz',
       home: 'Home',
+      connections: 'Connections',
       rules: 'Rules',
       settings: 'Settings',
       status: 'Status',
@@ -199,6 +255,18 @@ export const translations: Record<Language, Translations> = {
     },
     rules: {
       title: 'Routing Rules',
+      preset: 'Preset',
+      presetsHelp: 'Rules are shared by every profile. Switch a preset to change them.',
+      defaultPreset: 'Main',
+      newPreset: 'New preset',
+      renamePreset: 'Rename',
+      deletePreset: 'Delete',
+      confirmDeletePreset: 'Delete?',
+      templates: 'Templates',
+      templateBrowsers: 'Browsers via VPN',
+      templateMessengers: 'Messengers via VPN',
+      templateLaunchers: 'Game launchers direct',
+      presetName: 'Preset name',
       addRule: 'Add Rule',
       exportToConfig: 'Save rules to config',
       exportToConfigHelp: 'Saves your current rules into a YAML config file you choose.',
@@ -254,6 +322,13 @@ export const translations: Record<Language, Translations> = {
       logsAndDiagnostics: 'Logs and diagnostics',
       logs: 'Logs',
       importurl: 'Import from clipboard',
+      subscription: 'Subscription',
+      subscriptionUrl: 'Subscription URL',
+      subscriptionName: 'Name',
+      subscriptionAdd: 'Add subscription',
+      subscriptionRefresh: 'Refresh',
+      subscriptionUpdated: 'Updated',
+      subscriptionUserinfo: 'Usage',
       autoCheckUpdates: 'Auto check updates',
       autoRestartOnRuleApply: 'Auto apply rules',
       importConfig: 'Import configuration',
@@ -335,6 +410,40 @@ export const translations: Record<Language, Translations> = {
         },
       },
     },
+    connections: {
+      title: 'Connections',
+      add: 'Add',
+      typeSubscription: 'Subscription',
+      typeLocal: 'Local config',
+      serverCount: 'Servers: {count}',
+      rename: 'Rename',
+      updateSubscription: 'Update subscription',
+      subscriptionUpdatedNotice: 'Subscription "{name}" updated',
+      addTitle: 'Add connection',
+      addPlaceholder: 'Paste a link: subscription, YAML or server',
+      availableServers: 'Available servers',
+      settings: 'Settings',
+      expand: 'Show servers',
+      collapse: 'Hide servers',
+      fieldName: 'Name',
+      fieldLink: 'Subscription link',
+      fieldInterval: 'Update interval (hours)',
+      intervalPlaceholder: 'Provider default',
+      intervalHint: 'Leave empty to use the interval from the provider. A new link applies on the next update.',
+      intervalInvalid: 'Interval must be a whole number from 1 to 2160 hours',
+      information: 'Information',
+      emptyTitle: 'No connections yet',
+      emptyHint: 'Add a subscription or import a YAML config.',
+      servers: 'Servers',
+      back: 'Connections',
+      filename: 'File',
+      renameTitle: 'Rename',
+      addSubscriptionTitle: 'Add subscription',
+      selected: 'Selected',
+      actions: 'Actions',
+      deleteTitle: 'Delete connection',
+      deleteBody: 'Delete {name}? Profile files will be removed. VPN keeps running until you disconnect on Home.',
+    },
     logs: {
       title: 'Application Logs',
       export: 'Export',
@@ -344,6 +453,7 @@ export const translations: Record<Language, Translations> = {
       addConfigTitle: 'Add a config',
       addConfigSubtitle: 'Without a config the app will not work.',
       openSettings: 'Open settings',
+      openConnections: 'Open connections',
       continueWithoutConfig: 'Continue without config',
     },
     common: {
@@ -363,6 +473,7 @@ export const translations: Record<Language, Translations> = {
       title: 'Rododendron',
       subtitle: 'nnfz',
       home: 'Главная',
+      connections: 'Подключения',
       rules: 'Правила',
       settings: 'Настройки',
       status: 'Статус',
@@ -383,6 +494,18 @@ export const translations: Record<Language, Translations> = {
     },
     rules: {
       title: 'Правила маршрутизации',
+      preset: 'Пресет',
+      presetsHelp: 'Правила общие для всех профилей. Пресет переключает набор.',
+      defaultPreset: 'Основные',
+      newPreset: 'Новый пресет',
+      renamePreset: 'Переименовать',
+      deletePreset: 'Удалить',
+      confirmDeletePreset: 'Удалить?',
+      templates: 'Шаблоны',
+      templateBrowsers: 'Браузеры через VPN',
+      templateMessengers: 'Мессенджеры через VPN',
+      templateLaunchers: 'Лаунчеры игр напрямую',
+      presetName: 'Имя пресета',
       addRule: 'Добавить правило',
       exportToConfig: 'Сохранить правила в конфиг',
       exportToConfigHelp: 'Сохраняет текущие правила в YAML-конфиг, который ты выберешь.',
@@ -439,6 +562,13 @@ export const translations: Record<Language, Translations> = {
       exportConfig: 'Экспорт конфигурации',
       deleteConfig: 'Удалить конфигурацию',
       importurl: 'Вставить из буфера обмена',
+      subscription: 'Подписка',
+      subscriptionUrl: 'Адрес подписки',
+      subscriptionName: 'Имя',
+      subscriptionAdd: 'Добавить подписку',
+      subscriptionRefresh: 'Обновить',
+      subscriptionUpdated: 'Обновлено',
+      subscriptionUserinfo: 'Трафик',
       autoCheckUpdates: 'Автопроверка обновлений',
       interfaceLanguage: 'Язык интерфейса',
       logsAndDiagnostics: 'Логи и диагностика',
@@ -520,6 +650,40 @@ export const translations: Record<Language, Translations> = {
         },
       },
     },
+    connections: {
+      title: 'Подключения',
+      add: 'Добавить',
+      typeSubscription: 'Подписка',
+      typeLocal: 'Локальный конфиг',
+      serverCount: 'Серверы: {count}',
+      rename: 'Переименовать',
+      updateSubscription: 'Обновить подписку',
+      subscriptionUpdatedNotice: 'Подписка «{name}» обновлена',
+      addTitle: 'Добавить подключение',
+      addPlaceholder: 'Вставьте ссылку: подписка, YAML или сервер',
+      availableServers: 'Доступные серверы',
+      settings: 'Настройки',
+      expand: 'Показать серверы',
+      collapse: 'Скрыть серверы',
+      fieldName: 'Название',
+      fieldLink: 'Ссылка подписки',
+      fieldInterval: 'Интервал обновления (часы)',
+      intervalPlaceholder: 'По умолчанию от провайдера',
+      intervalHint: 'Оставьте пустым, чтобы использовать интервал провайдера. Новая ссылка применится при следующем обновлении.',
+      intervalInvalid: 'Интервал должен быть целым числом от 1 до 2160 часов',
+      information: 'Информация',
+      emptyTitle: 'Подключений пока нет',
+      emptyHint: 'Добавьте подписку или импортируйте YAML-конфиг.',
+      servers: 'Серверы',
+      back: 'Подключения',
+      filename: 'Файл',
+      renameTitle: 'Переименовать',
+      addSubscriptionTitle: 'Добавить подписку',
+      selected: 'Выбрано',
+      actions: 'Действия',
+      deleteTitle: 'Удалить подключение',
+      deleteBody: 'Удалить {name}? Файлы профиля будут удалены. VPN продолжит работать, пока вы не отключите его на главной.',
+    },
     logs: {
       title: 'Логи',
       export: 'Экспорт',
@@ -529,6 +693,7 @@ export const translations: Record<Language, Translations> = {
       addConfigTitle: 'Добавьте конфиг',
       addConfigSubtitle: 'Без конфига приложение не будет работать =(',
       openSettings: 'Открыть настройки',
+      openConnections: 'Открыть подключения',
       continueWithoutConfig: 'Пока без конфига',
     },
     common: {
@@ -548,6 +713,7 @@ export const translations: Record<Language, Translations> = {
       title: 'Rododendron',
       subtitle: 'nnfz',
       home: 'Галоўная',
+      connections: 'Падключэнні',
       rules: 'Правілы',
       settings: 'Налады',
       status: 'Статус',
@@ -568,6 +734,18 @@ export const translations: Record<Language, Translations> = {
     },
     rules: {
       title: 'Правілы маршрутызацыі',
+      preset: 'Прэсэт',
+      presetsHelp: 'Правілы агульныя для ўсіх профіляў. Прэсэт пераключае набор.',
+      defaultPreset: 'Асноўныя',
+      newPreset: 'Новы прэсэт',
+      renamePreset: 'Перайменаваць',
+      deletePreset: 'Выдаліць',
+      confirmDeletePreset: 'Выдаліць?',
+      templates: 'Шаблоны',
+      templateBrowsers: 'Браўзеры праз VPN',
+      templateMessengers: 'Мэсэнджары праз VPN',
+      templateLaunchers: 'Лаўнчары гульняў напрамую',
+      presetName: 'Назва прэсэта',
       addRule: 'Дадаць правіла',
       exportToConfig: 'Захаваць правілы ў канфіг',
       exportToConfigHelp: 'Захоўвае бягучыя правілы ў YAML-канфіг, які ты выберыш.',
@@ -625,6 +803,13 @@ export const translations: Record<Language, Translations> = {
       exportConfig: 'Экспарт канфігурацыі',
       deleteConfig: 'Выдаліць канфігурацыю',
       importurl: 'Уставіць з буфера абмену',
+      subscription: 'Падпіска',
+      subscriptionUrl: 'Адрас падпіскі',
+      subscriptionName: 'Імя',
+      subscriptionAdd: 'Дадаць падпіску',
+      subscriptionRefresh: 'Абнавіць',
+      subscriptionUpdated: 'Абноўлена',
+      subscriptionUserinfo: 'Трафік',
       autoCheckUpdates: 'Аўтапраўерка абнаўленняў',
       autoRestartOnRuleApply: 'Аўтапрымаўленне правіл',
       enableTun: 'Рэжым TUN',
@@ -704,6 +889,40 @@ export const translations: Record<Language, Translations> = {
         },
       },
     },
+    connections: {
+      title: 'Падключэнні',
+      add: 'Дадаць',
+      typeSubscription: 'Падпіска',
+      typeLocal: 'Лакальны канфіг',
+      serverCount: 'Серверы: {count}',
+      rename: 'Перайменаваць',
+      updateSubscription: 'Абнавіць падпіску',
+      subscriptionUpdatedNotice: 'Падпіска «{name}» абноўлена',
+      addTitle: 'Дадаць падключэнне',
+      addPlaceholder: 'Устаўце спасылку: падпіска, YAML або сервер',
+      availableServers: 'Даступныя серверы',
+      settings: 'Налады',
+      expand: 'Паказаць серверы',
+      collapse: 'Схаваць серверы',
+      fieldName: 'Назва',
+      fieldLink: 'Спасылка падпіскі',
+      fieldInterval: 'Інтэрвал абнаўлення (гадзіны)',
+      intervalPlaceholder: 'Па змаўчанні ад правайдэра',
+      intervalHint: 'Пакіньце пустым, каб выкарыстоўваць інтэрвал правайдэра. Новая спасылка ўжыецца пры наступным абнаўленні.',
+      intervalInvalid: 'Інтэрвал павінен быць цэлым лікам ад 1 да 2160 гадзін',
+      information: 'Інфармацыя',
+      emptyTitle: 'Падключэнняў пакуль няма',
+      emptyHint: 'Дадайце падпіску або імпартуйце YAML-канфіг.',
+      servers: 'Серверы',
+      back: 'Падключэнні',
+      filename: 'Файл',
+      renameTitle: 'Перайменаваць',
+      addSubscriptionTitle: 'Дадаць падпіску',
+      selected: 'Выбрана',
+      actions: 'Дзеянні',
+      deleteTitle: 'Выдаліць падключэнне',
+      deleteBody: 'Выдаліць {name}? Файлы профілю будуць выдалены. VPN працягне працаваць, пакуль вы не адключыце яго на галоўнай.',
+    },
     logs: {
       title: 'Логі праграмы',
       export: 'Экспарт',
@@ -713,6 +932,7 @@ export const translations: Record<Language, Translations> = {
       addConfigTitle: 'Дадайце канфіг',
       addConfigSubtitle: 'Без канфіга праграма не будзе працаваць.',
       openSettings: 'Адкрыць налады',
+      openConnections: 'Адкрыць падключэнні',
       continueWithoutConfig: 'Пакуль без канфіга',
     },
     common: {
@@ -730,3 +950,4 @@ export const translations: Record<Language, Translations> = {
 };
 
 export type Language = 'en' | 'ru' | 'be';
+

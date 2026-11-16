@@ -26,9 +26,9 @@ interface HomePageProps {
   hasConfig: boolean;
 }
 
-function HomePage({ 
-  vpnEnabled, 
-  vpnStatus, 
+function HomePage({
+  vpnEnabled,
+  vpnStatus,
   parsedConfig,
   connectedConfigSnapshot,
   homeDisplaySnapshot,
@@ -36,7 +36,7 @@ function HomePage({
   pollingEnabled = true,
   isConnecting,
   error,
-  toggleVPN, 
+  toggleVPN,
   hasConfig,
 }: HomePageProps) {
   const { t } = useI18n();

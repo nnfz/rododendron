@@ -1,14 +1,17 @@
 mod api_cache;
 mod errors;
+mod instance_lock;
 mod metrics;
 mod mihomo;
 mod optimizations;
 mod process_scanner;
+mod subscription;
+mod subscription_cmd;
 mod updater;
 mod task_scheduler;
 
 use mihomo::{
-    clear_mihomo_logs, delete_config, export_config_to_path, generate_config,
+    clear_mihomo_logs, delete_config, export_config_to_path, generate_config, rename_config,
     get_mihomo_binary_name, get_mihomo_core_version, get_mihomo_logs, get_vpn_status, import_config, list_configs,
     mihomo_get_connections, mihomo_get_delay, mihomo_get_proxies, mihomo_get_traffic,
     open_config_file, parse_config, parse_config_yaml, ping_host, read_config,
@@ -24,6 +27,10 @@ use mihomo::{
 };
 use metrics::get_vpn_metrics;
 use process_scanner::get_running_processes;
+use subscription_cmd::{
+    add_subscription, save_subscription_settings, set_selected_server, subscription_meta,
+    update_subscription,
+};
 use updater::{check_for_updates, install_update};
 use task_scheduler::{
     is_task_scheduler_enabled,
@@ -154,6 +161,13 @@ pub fn run() {
                 .app_config_dir()
                 .or_else(|_| app.path().app_local_data_dir())
                 .unwrap_or_else(|_| std::env::temp_dir().join("Rododendron"));
+
+            instance_lock::acquire(&config_dir).map_err(|err| {
+                std::io::Error::new(std::io::ErrorKind::AlreadyExists, err)
+            })?;
+            if let Err(err) = subscription::recover_subscription_transactions(&config_dir) {
+                tracing::warn!("Subscription recovery failed: {err}");
+            }
 
             let log_dir = config_dir.join("logs");
             let _ = std::fs::create_dir_all(&log_dir);
@@ -286,6 +300,7 @@ pub fn run() {
             import_config,
             read_config,
             delete_config,
+            rename_config,
             list_configs,
             export_config_to_path,
             resolve_config_path,
@@ -294,6 +309,11 @@ pub fn run() {
             // ── Rules ──
             save_rules_to_config,
             save_rules_to_path,
+            add_subscription,
+            update_subscription,
+            save_subscription_settings,
+            subscription_meta,
+            set_selected_server,
             // ── Core VPN ──
             start_vpn,
             stop_vpn,

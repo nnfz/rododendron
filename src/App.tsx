@@ -6,15 +6,17 @@ import Sidebar from './components/Sidebar';
 import HomePage from './components/HomePage';
 import RulesPage from './components/RulesPage';
 import SettingsPage from './components/SettingsPage';
+import ConnectionsPage from './components/ConnectionsPage';
 import LogsModal from './components/LogsModal';
 import { useVPNState } from './hooks/useVPNState';
 import { useSettingsStorage } from './hooks/useSettingsStorage';
-import { useRulesStorage } from './hooks/useRulesStorage';
+import { useRulePresets } from './hooks/useRulePresets';
 import { useTagsStorage } from './hooks/useTagsStorage';
-import type { Rule, Tag, Log, LogLevel, Config, ParsedConfig } from './types';
+import type { Rule, Tag, Log, LogLevel, Config, ParsedConfig, RenamedConfig, SubscriptionInfo, TabType } from './types';
 import { useI18n } from './i18n';
 import { isTauri } from './utils/isTauri';
 import { syncAutostart } from './utils/autostart';
+import { PRESETS_STORAGE_KEY, type ProfileRuleHint } from './utils/rulePresets';
 
 const EMPTY_LOGS: Log[] = [];
 const HOME_SNAPSHOT_KEY = 'vpn-home-display-snapshot';
@@ -29,7 +31,6 @@ function formatTime(date: Date): string {
 export default function App() {
   const { t } = useI18n();
 
-  const initialLoadDone = useRef(false);
   const autoConnectTriggeredRef = useRef(false);
   const autoConnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wasVpnEnabledRef = useRef(false);
@@ -42,12 +43,24 @@ export default function App() {
 
   const [isNarrowLayout, setIsNarrowLayout] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [activePage, setActivePage] = useState<'home' | 'rules' | 'settings'>('home');
+  const [activePage, setActivePage] = useState<TabType>('home');
   const [showLogsModal, setShowLogsModal] = useState(false);
 
-  const [rules, setRules] = useState<Rule[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
-  const [configRulesLoaded, setConfigRulesLoaded] = useState<string | null>(null);
+  const [profileRuleHints, setProfileRuleHints] = useState<ProfileRuleHint[] | null>(null);
+  const {
+    presets,
+    activePresetId,
+    rules,
+    ready: presetsReady,
+    setRules,
+    selectPreset,
+    createPreset,
+    renamePreset,
+    deletePreset,
+    migrateIfNeeded,
+  } = useRulePresets(t.rules.defaultPreset);
+  useTagsStorage(tags, setTags);
   const [settings, setSettings] = useSettingsStorage();
   const [logs, setLogs] = useState<Log[]>([]);
   const [configsLoaded, setConfigsLoaded] = useState(false);
@@ -73,6 +86,8 @@ export default function App() {
     serverName: string;
     port: number;
   } | null>(null);
+  const [subscriptionInfo, setSubscriptionInfo] = useState<SubscriptionInfo | null>(null);
+  const [configReloadToken, setConfigReloadToken] = useState(0);
 
   useEffect(() => {
     const saved = localStorage.getItem(HOME_SNAPSHOT_KEY);
@@ -166,30 +181,61 @@ export default function App() {
   }, [settings.autoCheckUpdates, addLog, notifyUpdate]);
 
   useEffect(() => {
-    if (!isTauri()) return;
+    if (!isTauri()) {
+      setProfileRuleHints([]);
+      setConfigsLoaded(true);
+      return;
+    }
     const loadConfigs = async () => {
       try {
         const { invoke } = await import('@tauri-apps/api/core');
         const filenames = await invoke<string[]>('list_configs');
-        const loadedConfigs: Config[] = filenames.map(filename => ({
-          id: `config-${filename}`,
-          name: filename.replace(/\.(yaml|yml)$/, ''),
-          filename,
-        }));
+        const presetsExist = localStorage.getItem(PRESETS_STORAGE_KEY) != null;
+        const hints: ProfileRuleHint[] = [];
+        const loadedConfigs: Config[] = [];
+        for (const filename of filenames) {
+          let name = filename.replace(/\.(yaml|yml)$/, '');
+          let userRuleLines: string[] | null = null;
+          let parsedRules: ParsedConfig['rules'] | undefined;
+          try {
+            const info = await invoke<SubscriptionInfo | null>('subscription_meta', { filename });
+            if (info) {
+              const title = info.title?.trim();
+              if (title) name = title;
+              userRuleLines = info.userRuleLines ?? [];
+            }
+          } catch {
+            // A local profile has no subscription metadata.
+          }
+          if (!presetsExist && userRuleLines == null) {
+            try {
+              const content = await invoke<string>('read_config', { filename });
+              const parsed = await invoke<ParsedConfig>('parse_config', { configContent: content });
+              parsedRules = parsed.rules;
+            } catch {
+              // The file is loaded again when the profile opens.
+            }
+          }
+          const id = `config-${filename}`;
+          loadedConfigs.push({ id, name, filename });
+          hints.push({ id, name, userRuleLines, parsedRules });
+        }
+        setProfileRuleHints(hints);
         setConfigs(loadedConfigs);
-        setConfigsLoaded(true);
         const savedActive = localStorage.getItem(ACTIVE_CONFIG_KEY);
-        if (savedActive && loadedConfigs.some(c => c.id === savedActive)) {
+        if (savedActive && loadedConfigs.some(config => config.id === savedActive)) {
           setActiveConfigId(savedActive);
         } else if (loadedConfigs.length > 0) {
           setActiveConfigId(loadedConfigs[0].id);
         }
       } catch (e) {
         console.error('Failed to load configs:', e);
+        setProfileRuleHints([]);
+      } finally {
         setConfigsLoaded(true);
       }
     };
-    loadConfigs();
+    void loadConfigs();
   }, []);
 
   useEffect(() => {
@@ -202,9 +248,6 @@ export default function App() {
   const wrappedSetActiveConfigId = useCallback<Dispatch<SetStateAction<string>>>(
     value => {
       const nextId = typeof value === 'function' ? value(activeConfigId) : value;
-      initialLoadDone.current = false;
-      setConfigRulesLoaded(null);
-      setRules([]);
       setActiveConfigContent(null);
       setParsedConfig(null);
       setParsedConfigFilename(null);
@@ -216,8 +259,13 @@ export default function App() {
   );
 
   useEffect(() => {
+    if (!configsLoaded || profileRuleHints === null) return;
+    migrateIfNeeded(profileRuleHints, activeConfigId || null);
+  }, [configsLoaded, profileRuleHints, activeConfigId, migrateIfNeeded]);
+
+  useEffect(() => {
     if (!noConfigs) return;
-    if (activePage !== 'settings') setActivePage('settings');
+    if (activePage !== 'connections' && activePage !== 'settings') setActivePage('connections');
   }, [noConfigs, activePage]);
 
   useEffect(() => {
@@ -229,6 +277,59 @@ export default function App() {
     const c = configs.find(x => x.id === activeConfigId);
     return c?.name || c?.filename || null;
   }, [configs, activeConfigId]);
+
+  useEffect(() => {
+    setSubscriptionInfo(null);
+  }, [activeConfigFilename]);
+
+  useEffect(() => {
+    if (!activeConfigFilename || !isTauri()) return;
+    let cancelled = false;
+    const filename = activeConfigFilename;
+    const loadSubscription = async () => {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const info = await invoke<SubscriptionInfo | null>('subscription_meta', { filename });
+        if (!cancelled) setSubscriptionInfo(info);
+      } catch {
+        if (!cancelled) setSubscriptionInfo(null);
+      }
+    };
+    void loadSubscription();
+    return () => { cancelled = true; };
+  }, [activeConfigFilename, configReloadToken]);
+
+  const handleSubscriptionAdded = useCallback((info: SubscriptionInfo) => {
+    const existing = configs.find(config => config.filename === info.filename);
+    const nextId = existing?.id ?? `config-${info.filename}`;
+    if (!existing) {
+      setConfigs(prev => (
+        prev.some(config => config.filename === info.filename)
+          ? prev
+          : [...prev, {
+              id: nextId,
+              name: info.title.trim() || info.filename.replace(/\.(yaml|yml)$/, ''),
+              filename: info.filename,
+            }]
+      ));
+    }
+    setSubscriptionInfo(info);
+    wrappedSetActiveConfigId(nextId);
+  }, [configs, wrappedSetActiveConfigId]);
+
+  const handleSubscriptionUpdated = useCallback((info: SubscriptionInfo) => {
+    const title = info.title.trim();
+    if (title) {
+      setConfigs(prev => prev.map(config => (
+        config.filename === info.filename && config.name !== title
+          ? { ...config, name: title }
+          : config
+      )));
+    }
+    if (info.filename !== activeConfigFilename) return;
+    setSubscriptionInfo(info);
+    setConfigReloadToken(token => token + 1);
+  }, [activeConfigFilename]);
 
   useEffect(() => {
     if (!activeConfigId || !isTauri() || !activeConfigFilename) return;
@@ -252,9 +353,49 @@ export default function App() {
     };
     loadContent();
     return () => { cancelled = true; };
-  }, [activeConfigId, activeConfigFilename]);
+  }, [activeConfigId, activeConfigFilename, configReloadToken]);
 
   const { vpnEnabled, vpnStatus, isConnecting, error: vpnError, startVPN, stopVPN } = useVPNState();
+
+  const selectServer = useCallback(async (filename: string, serverId: string) => {
+    if (!serverId || !filename || !isTauri()) return;
+    const { invoke } = await import('@tauri-apps/api/core');
+    const info = await invoke<SubscriptionInfo>('set_selected_server', { filename, serverId });
+    setSubscriptionInfo(info);
+    setConfigReloadToken(token => token + 1);
+  }, []);
+
+  const subscriptionFilename = subscriptionInfo?.filename ?? null;
+  const subscriptionIntervalHours = subscriptionInfo?.intervalHours ?? null;
+  const subscriptionUpdatedAt = subscriptionInfo?.updatedAt ?? null;
+
+  useEffect(() => {
+    if (!subscriptionFilename || !subscriptionIntervalHours || !subscriptionUpdatedAt || !isTauri()) return;
+    const lastUpdate = new Date(subscriptionUpdatedAt.replace(' ', 'T')).getTime();
+    if (Number.isNaN(lastUpdate)) return;
+    const intervalMs = subscriptionIntervalHours * 60 * 60 * 1000;
+    let cancelled = false;
+    let running = false;
+    const check = async () => {
+      if (cancelled || running || Date.now() - lastUpdate < intervalMs) return;
+      running = true;
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const info = await invoke<SubscriptionInfo>('update_subscription', { filename: subscriptionFilename });
+        if (!cancelled) handleSubscriptionUpdated(info);
+      } catch (error) {
+        addLog('ERROR', error instanceof Error ? error.message : String(error));
+      } finally {
+        running = false;
+      }
+    };
+    void check();
+    const timer = setInterval(() => { void check(); }, 15 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [subscriptionFilename, subscriptionIntervalHours, subscriptionUpdatedAt, handleSubscriptionUpdated, addLog]);
 
   useEffect(() => {
     if (!vpnEnabled) { setVpnRunningConfigId(null); setRestartRequiredForConfig(false); }
@@ -287,15 +428,22 @@ export default function App() {
     });
   }, [vpnEnabled, connectedConfigSnapshot, parsedConfig, parsedConfigFilename, activeConfigFilename]);
 
+  const selectedSubscriptionNode = useMemo(() => {
+    const selectedId = subscriptionInfo?.selectedServerId;
+    if (!subscriptionInfo || !selectedId) return null;
+    const matches = subscriptionInfo.nodes.filter(node => node.id === selectedId);
+    return matches.length === 1 ? matches[0] : null;
+  }, [subscriptionInfo]);
+
   useEffect(() => {
     setHomeDisplaySnapshot(prev => {
       const prevProxy = prev?.proxyName;
       const prevServer = prev?.serverName;
       const prevPort = prev?.port;
       if (vpnEnabled) {
-        const proxyName = vpnStatus?.proxy_name || connectedConfigSnapshot?.proxy_name || prevProxy;
-        const serverName = vpnStatus?.server || connectedConfigSnapshot?.server_address || prevServer;
-        const port = vpnStatus?.port || connectedConfigSnapshot?.mixed_port || prevPort;
+        const proxyName = selectedSubscriptionNode?.name || vpnStatus?.proxy_name || connectedConfigSnapshot?.proxy_name || prevProxy;
+        const serverName = selectedSubscriptionNode?.server || vpnStatus?.server || connectedConfigSnapshot?.server_address || prevServer;
+        const port = selectedSubscriptionNode?.port || vpnStatus?.port || connectedConfigSnapshot?.mixed_port || prevPort;
         if (!proxyName && !serverName && !port) return prev;
         return { proxyName: proxyName || 'Unknown', serverName: serverName || 'Not configured', port: port || 7890 };
       }
@@ -305,7 +453,7 @@ export default function App() {
       if (!proxyName && !serverName && !port) return prev;
       return { proxyName: proxyName || 'Unknown', serverName: serverName || 'Not configured', port: port || 7890 };
     });
-  }, [vpnEnabled, vpnStatus, connectedConfigSnapshot, parsedConfig]);
+  }, [vpnEnabled, vpnStatus, connectedConfigSnapshot, parsedConfig, selectedSubscriptionNode]);
 
   const restartVPN = useCallback(
     async (rulesOverride?: Rule[]) => {
@@ -328,7 +476,7 @@ export default function App() {
               try {
                 const { invoke } = await import('@tauri-apps/api/core');
                 const userRules = rulesToApply.map(r => ({ id: r.id, app: r.app, rule: r.rule, active: r.active, rule_type: r.ruleType || 'process' }));
-                const finalConfig = (await invoke('generate_config', { baseConfig: activeConfigContent, userRules, tunMode: settings.tunMode })) as string;
+                const finalConfig = (await invoke('generate_config', { baseConfig: activeConfigContent, userRules, tunMode: settings.tunMode, configFilename: activeConfigFilename })) as string;
                 addLog('INFO', 'Applying rules without restart...');
                 await invoke('reload_mihomo_config', { configContent: finalConfig, configFilename: activeConfigFilename });
                 addLog('INFO', 'Rules applied');
@@ -339,7 +487,6 @@ export default function App() {
               }
             }
             addLog('INFO', 'Restarting VPN...');
-            await stopVPN();
             await startVPN(activeConfigContent, activeConfigFilename, rulesToApply, undefined, settings.tunMode);
             setVpnRunningConfigId(activeConfigId || null);
             setRestartRequiredForConfig(false);
@@ -350,7 +497,7 @@ export default function App() {
 
       restartVpnTimeoutRef.current = setTimeout(() => { void runRestart(); }, 500);
     },
-    [activeConfigContent, activeConfigFilename, rules, settings, stopVPN, startVPN, addLog, activeConfigId]
+    [activeConfigContent, activeConfigFilename, rules, settings, startVPN, addLog, activeConfigId]
   );
 
   useEffect(() => {
@@ -362,6 +509,7 @@ export default function App() {
         const { listen } = await import('@tauri-apps/api/event');
         unlistenStart = await listen('tray://start', async () => {
           if (vpnEnabled) return;
+          if (!presetsReady) return;
           if (!activeConfigContent || !activeConfigFilename) { addLog('ERROR', 'No active config selected for Start'); return; }
           try {
             addLog('INFO', 'Starting VPN (tray)...');
@@ -380,7 +528,7 @@ export default function App() {
     };
     setup();
     return () => { try { unlistenStart?.(); } catch {} try { unlistenRestart?.(); } catch {} };
-  }, [vpnEnabled, activeConfigContent, activeConfigFilename, rules, settings, startVPN, restartVPN, addLog, parsedConfig, activeConfigId]);
+  }, [vpnEnabled, activeConfigContent, activeConfigFilename, rules, settings, startVPN, restartVPN, addLog, parsedConfig, activeConfigId, presetsReady]);
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -419,57 +567,30 @@ export default function App() {
     run();
   }, [settings.closeBehavior]);
 
-  useRulesStorage(activeConfigId, rules, setRules);
-  useTagsStorage(activeConfigId, tags, setTags);
-
   useEffect(() => {
-    initialLoadDone.current = false;
-    setConfigRulesLoaded(null);
     setActiveConfigContent(null);
     setParsedConfig(null);
     setParsedConfigFilename(null);
   }, [activeConfigId]);
 
   useEffect(() => {
-    if (!parsedConfig || !activeConfigId) return;
-    if (!activeConfigFilename || parsedConfigFilename !== activeConfigFilename) return;
-    if (configRulesLoaded === activeConfigId) return;
-    const rulesStorageKey = `vpn-rules:${activeConfigId}`;
-    let savedRules: Rule[] = [];
-    try { const saved = localStorage.getItem(rulesStorageKey); if (saved) savedRules = JSON.parse(saved) as Rule[]; } catch { savedRules = []; }
-    const makeRuleKey = (rule: Pick<Rule, 'app' | 'rule' | 'ruleType'>) => {
-      const type = rule.ruleType || 'process';
-      return `${type}:${rule.app.trim().toLowerCase()}:${rule.rule.trim()}`;
-    };
-    const savedByKey = new Map<string, Rule>();
-    for (const r of savedRules) savedByKey.set(makeRuleKey(r), r);
-    const baseId = Date.now();
-    const configRules: Rule[] = parsedConfig.rules.map((r, idx) => {
-      const ruleType: Rule['ruleType'] = r.rule_type === 'process' || r.rule_type === 'domain' || r.rule_type === 'domain_keyword' || r.rule_type === 'ip' ? r.rule_type : 'domain';
-      const nextRule: Rule = { id: baseId + idx, app: r.target, rule: r.action === 'PROXY' ? 'Via VPN' : 'Direct', active: true, ruleType };
-      const saved = savedByKey.get(makeRuleKey(nextRule));
-      if (saved) return { ...nextRule, id: saved.id, active: saved.active, tags: saved.tags };
-      return nextRule;
-    });
-    const configKeys = new Set(configRules.map(makeRuleKey));
-    const missingSavedInactive = savedRules.filter(r => !r.active && !configKeys.has(makeRuleKey(r)));
-    setRules([...configRules, ...missingSavedInactive]);
-    setConfigRulesLoaded(activeConfigId);
-    setTimeout(() => { initialLoadDone.current = true; }, 100);
-  }, [parsedConfig, parsedConfigFilename, activeConfigId, activeConfigFilename, configRulesLoaded]);
-
-  useEffect(() => {
-    if (!isTauri() || !activeConfigFilename || !initialLoadDone.current) return;
+    if (!presetsReady || !isTauri() || !activeConfigFilename) return;
     const saveRules = async () => {
       try {
         const { invoke } = await import('@tauri-apps/api/core');
-        const userRules = rules.map(r => ({ id: r.id, app: r.app, rule: r.rule, active: r.active, rule_type: r.ruleType || 'process' }));
+        const userRules = rules.map(rule => ({
+          id: rule.id,
+          app: rule.app,
+          rule: rule.rule,
+          active: rule.active,
+          rule_type: rule.ruleType || 'process',
+        }));
         await invoke('save_rules_to_config', { filename: activeConfigFilename, userRules });
       } catch (e) { console.error('Failed to save rules:', e); }
     };
     const timeout = setTimeout(saveRules, 500);
     return () => clearTimeout(timeout);
-  }, [rules, activeConfigFilename]);
+  }, [rules, activeConfigFilename, presetsReady]);
 
   const handleToggleVPN = useCallback(async () => {
     if (vpnEnabled || isConnecting) {
@@ -478,6 +599,7 @@ export default function App() {
       setConnectedConfigSnapshot(null);
     } else {
       userStopRef.current = false;
+      if (!presetsReady) return;
       if (!activeConfigContent || !activeConfigFilename) { addLog('ERROR', 'No config selected or invalid config file'); return; }
       try {
         await startVPN(activeConfigContent, activeConfigFilename, rules, undefined, settings.tunMode);
@@ -486,7 +608,7 @@ export default function App() {
         setConnectedConfigSnapshot({ proxy_name: parsedConfig?.proxy_name ?? null, server_address: parsedConfig?.server_address ?? null, mixed_port: typeof parsedConfig?.mixed_port === 'number' ? parsedConfig.mixed_port : null });
       } catch (error) { addLog('ERROR', `Failed to start VPN: ${error instanceof Error ? error.message : String(error)}`); }
     }
-  }, [vpnEnabled, isConnecting, activeConfigContent, activeConfigFilename, rules, settings, startVPN, stopVPN, addLog, parsedConfig, activeConfigId]);
+  }, [vpnEnabled, isConnecting, activeConfigContent, activeConfigFilename, rules, settings, startVPN, stopVPN, addLog, parsedConfig, activeConfigId, presetsReady]);
 
   useEffect(() => {
     return () => { if (autoConnectTimeoutRef.current) { clearTimeout(autoConnectTimeoutRef.current); autoConnectTimeoutRef.current = null; } };
@@ -499,6 +621,7 @@ export default function App() {
       return;
     }
     if (vpnEnabled || isConnecting) return;
+    if (!presetsReady) return;
     if (!activeConfigContent || !activeConfigFilename) return;
     if (autoConnectTriggeredRef.current || autoConnectTimeoutRef.current) return;
     addLog('INFO', 'Auto-connect: scheduled...');
@@ -508,7 +631,7 @@ export default function App() {
       addLog('INFO', 'Auto-connect: connecting...');
       handleToggleVPN();
     }, 1500);
-  }, [settings.autoConnect, vpnEnabled, isConnecting, activeConfigContent, activeConfigFilename, handleToggleVPN, addLog]);
+  }, [settings.autoConnect, vpnEnabled, isConnecting, activeConfigContent, activeConfigFilename, handleToggleVPN, addLog, presetsReady]);
 
   useEffect(() => {
     if (userStopRef.current) {
@@ -550,9 +673,57 @@ export default function App() {
     if (isNarrowLayout) setSidebarOpen(false);
   }, [activePage, isNarrowLayout]);
 
+  const markRestartRequired = useCallback(() => {
+    setRestartRequiredForConfig(true);
+  }, []);
+
+  const handleImported = useCallback((filename: string) => {
+    const canonicalId = `config-${filename}`;
+    const stem = filename.replace(/\.(yaml|yml)$/, '');
+    const existing = configs.find(config => config.filename === filename);
+    if (!existing) {
+      setConfigs(prev => (
+        prev.some(config => config.filename === filename)
+          ? prev
+          : [...prev, { id: canonicalId, name: stem, filename }]
+      ));
+    }
+    const nextId = existing?.id ?? canonicalId;
+    if (activeConfigId !== nextId) wrappedSetActiveConfigId(nextId);
+    else setConfigReloadToken(token => token + 1);
+  }, [configs, activeConfigId, wrappedSetActiveConfigId]);
+
+  const handleDeleted = useCallback((config: Config) => {
+    const remaining = configs.filter(item => item.id !== config.id);
+    setConfigs(remaining);
+    if (activeConfigId === config.id) wrappedSetActiveConfigId(remaining[0]?.id || '');
+  }, [configs, activeConfigId, wrappedSetActiveConfigId]);
+
+  const handleRenamed = useCallback((previous: Config, renamed: RenamedConfig) => {
+    if (renamed.subscription || renamed.filename === previous.filename) {
+      const title = renamed.title.trim() || previous.name;
+      setConfigs(prev => prev.map(config => (
+        config.id === previous.id ? { ...config, name: title } : config
+      )));
+      return;
+    }
+    const newId = `config-${renamed.filename}`;
+    setConfigs(prev => prev.map(config => (
+      config.id === previous.id
+        ? { id: newId, name: renamed.title, filename: renamed.filename }
+        : config
+    )));
+    if (activeConfigId === previous.id) {
+      setHomeDisplaySnapshot(null);
+      setConnectedConfigSnapshot(null);
+      setActiveConfigId(newId);
+    }
+    setVpnRunningConfigId(current => (current === previous.id ? newId : current));
+  }, [activeConfigId]);
+
   const setActiveTab = useCallback(
-    (tab: 'home' | 'rules' | 'settings') => {
-      if (noConfigs && tab !== 'settings') return;
+    (tab: TabType) => {
+      if (noConfigs && tab !== 'connections' && tab !== 'settings') return;
       setActivePage(tab);
       if (isNarrowLayout) setSidebarOpen(false);
     },
@@ -561,23 +732,52 @@ export default function App() {
 
   const pageContent = useMemo(() => {
     switch (activePage) {
+      case 'connections':
+        return (
+          <ConnectionsPage
+            configs={configs}
+            activeConfigId={activeConfigId}
+            activeConfigFilename={activeConfigFilename}
+            setActiveConfigId={wrappedSetActiveConfigId}
+            subscriptionInfo={subscriptionInfo}
+            onSubscriptionAdded={handleSubscriptionAdded}
+            onSubscriptionUpdated={handleSubscriptionUpdated}
+            onSelectServer={selectServer}
+            onRenamed={handleRenamed}
+            onDeleted={handleDeleted}
+            onImported={handleImported}
+            setActiveConfigContent={setActiveConfigContent}
+            setParsedConfig={setParsedConfig}
+            vpnEnabled={vpnEnabled}
+            onNeedsRestart={markRestartRequired}
+          />
+        );
       case 'rules':
         return (
           <RulesPage
-            rules={rules} setRules={setRules} tags={tags} setTags={setTags}
-            vpnEnabled={vpnEnabled} restartVPN={restartVPN}
-            activeConfigFilename={activeConfigFilename}
+            rules={rules}
+            setRules={setRules}
+            presets={presets}
+            activePresetId={activePresetId}
+            presetsReady={presetsReady}
+            onSelectPreset={selectPreset}
+            onCreatePreset={createPreset}
+            onRenamePreset={renamePreset}
+            onDeletePreset={deletePreset}
+            tags={tags}
+            setTags={setTags}
+            vpnEnabled={vpnEnabled}
+            restartVPN={restartVPN}
             autoRestartOnRuleApply={settings.autoRestartOnRuleApply}
           />
         );
       case 'settings':
         return (
           <SettingsPage
-            setShowLogsModal={setShowLogsModal} configs={configs} setConfigs={setConfigs}
-            activeConfigId={activeConfigId} setActiveConfigId={wrappedSetActiveConfigId}
-            setActiveConfigContent={setActiveConfigContent} setParsedConfig={setParsedConfig}
+            setShowLogsModal={setShowLogsModal}
             vpnEnabled={vpnEnabled}
-            settings={settings} setSettings={setSettings}
+            settings={settings}
+            setSettings={setSettings}
             availableUpdateVersion={availableUpdateVersion}
             setNeedsRestart={setRestartRequiredForConfig}
           />
@@ -585,7 +785,7 @@ export default function App() {
       default:
         return null;
     }
-  }, [activePage, vpnEnabled, activeConfigFilename, configs, activeConfigId, rules, tags, restartVPN, settings, wrappedSetActiveConfigId, availableUpdateVersion]);
+  }, [activePage, vpnEnabled, activeConfigFilename, configs, activeConfigId, rules, presets, activePresetId, presetsReady, tags, restartVPN, settings, wrappedSetActiveConfigId, availableUpdateVersion, subscriptionInfo, handleSubscriptionAdded, handleSubscriptionUpdated, selectServer, handleRenamed, handleDeleted, handleImported, markRestartRequired, setRules, selectPreset, createPreset, renamePreset, deletePreset]);
 
   return (
     <div className="app-root">
@@ -598,9 +798,9 @@ export default function App() {
               <button
                 type="button"
                 className="btn btn-primary-dark"
-                onClick={() => { setActivePage('settings'); setDismissNoConfigSplash(true); }}
+                onClick={() => { setActivePage('connections'); setDismissNoConfigSplash(true); }}
               >
-                {t.welcome.openSettings}
+                {t.welcome.openConnections}
               </button>
             </div>
           </div>

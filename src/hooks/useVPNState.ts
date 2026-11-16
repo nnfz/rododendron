@@ -81,6 +81,7 @@ export function useVPNState(): VPNState {
         userRules,
         networkInterface: networkInterface || null,
         tunMode: typeof tunMode === 'boolean' ? tunMode : null,
+        configFilename,
       }) as string;
 
       const status = await invoke('start_vpn', {
