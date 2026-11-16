@@ -176,6 +176,13 @@ pub async fn update_subscription(
     validate_config(&yaml)?;
     meta.base_rules = normalized.base_rules;
     meta.nodes = normalized.nodes;
+    let next_title = subscription::title_after_update(&meta.title, fetched.title.as_deref());
+    if next_title != meta.title {
+        tracing::info!(
+            "update_subscription: title for {filename} changed to {next_title}"
+        );
+        meta.title = next_title;
+    }
     meta.updated_at = now_stamp();
     meta.userinfo = fetched.userinfo.clone();
     meta.etag = fetched.etag;

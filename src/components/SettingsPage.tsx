@@ -13,6 +13,7 @@ import type { Language } from '../i18n/translations';
 import type { Settings, NetworkInterface } from '../types';
 import type { CSSProperties, Dispatch, SetStateAction } from 'react';
 import { isTauri } from '../utils/isTauri';
+import { version as appVersion } from '../../package.json';
 import {
   disableAutostart,
   enableAutostart,
@@ -272,7 +273,9 @@ function SettingsPage({
 
   return (
     <div className="page-content">
-      <h2 className="page-title">{t.settings.title}</h2>
+      <div className='page-header'>
+        <h2 className="page-title">{t.settings.title}</h2>
+      </div>
 
       <div className="container-narrow">
         {/* Main Settings */}
@@ -500,7 +503,7 @@ function SettingsPage({
                     : undefined
                 }
               >
-                {__APP_VERSION__}
+                {appVersion}
               </span>
             </div>
             <div className="panel-row disabled">

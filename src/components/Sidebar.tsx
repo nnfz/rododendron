@@ -29,8 +29,9 @@ function Sidebar({
   isOpen = true,
 }: SidebarProps) {
   const { t } = useI18n();
+  const floating = Boolean(className?.includes('sidebar-floating'));
 
-  if (!isOpen) return null;
+  if (!isOpen && !floating) return null;
 
   const handleRestart = () => {
     if (vpnEnabled && hasConfig) {
@@ -39,7 +40,11 @@ function Sidebar({
   };
 
   return (
-    <div className={`sidebar ${className || ''}`.trim()}>
+    <div
+      className={['sidebar', className, isOpen ? 'sidebar-open' : ''].filter(Boolean).join(' ')}
+      aria-hidden={floating && !isOpen}
+      inert={floating && !isOpen ? true : undefined}
+    >
       <div className="sidebar-header">
         <h1 className="sidebar-title">{t.sidebar.title}</h1>
         <p className="sidebar-subtitle">{activeConfigName || t.sidebar.subtitle}</p>

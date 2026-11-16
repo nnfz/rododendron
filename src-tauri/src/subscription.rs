@@ -897,6 +897,15 @@ pub fn save_meta(root: &Path, meta: &SubscriptionMeta) -> Result<(), String> {
     write_sync(&json_path(root, &meta.id), &text)
 }
 
+/// Provider `profile-title` replaces the stored name. A missing or invalid
+/// header keeps the current name, including a title the user typed locally.
+pub fn title_after_update(current: &str, fetched: Option<&str>) -> String {
+    let Some(fetched) = fetched.map(str::trim).filter(|title| !title.is_empty()) else {
+        return current.to_string();
+    };
+    crate::mihomo::normalize_display_title(fetched).unwrap_or_else(|_| current.to_string())
+}
+
 pub fn rename_subscription_title(root: &Path, filename: &str, title: &str) -> Result<String, String> {
     let title = crate::mihomo::normalize_display_title(title)?;
     let mut meta = load_meta_by_filename(root, filename)
@@ -2617,6 +2626,14 @@ rules:
              "streamSettings": {"network": "xhttp", "security": "tls"}}]}]"#;
         let err = parse_subscription_text(only_xhttp).err().unwrap();
         assert!(err.contains("xhttp"), "{err}");
+    }
+
+    #[test]
+    fn subscription_update_adopts_a_new_profile_title() {
+        assert_eq!(title_after_update("Old", Some("  New name  ")), "New name");
+        assert_eq!(title_after_update("Old", None), "Old");
+        assert_eq!(title_after_update("Old", Some("   ")), "Old");
+        assert_eq!(title_after_update("Old", Some("bad\nname")), "Old");
     }
 
     #[test]

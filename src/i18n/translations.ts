@@ -45,8 +45,8 @@ export type Translations = {
     newTag: string;
     tagName: string;
     tagColor: string;
-    copy: string;
-    paste: string;
+    export: string;
+    import: string;
     noTags: string;
     noTagsYet: string;
     editRuleTags: string;
@@ -276,8 +276,8 @@ export const translations: Record<Language, Translations> = {
       newTag: 'New tag',
       tagName: 'Tag name',
       tagColor: 'Tag color',
-      copy: 'Copy',
-      paste: 'Paste',
+      export: 'Export',
+      import: 'Import',
       noTags: 'No tags',
       noTagsYet: 'No tags yet',
       editRuleTags: 'Rule tags',
@@ -515,8 +515,8 @@ export const translations: Record<Language, Translations> = {
       newTag: 'Новый тег',
       tagName: 'Имя тега',
       tagColor: 'Цвет',
-      copy: 'Копировать',
-      paste: 'Вставить',
+      export: 'Экспорт',
+      import: 'Импорт',
       noTags: 'Без тегов',
       noTagsYet: 'Тегов пока нет',
       editRuleTags: 'Теги правила',
@@ -755,8 +755,8 @@ export const translations: Record<Language, Translations> = {
       newTag: 'Новы тэг',
       tagName: 'Назва тэга',
       tagColor: 'Колер',
-      copy: 'Капіяваць',
-      paste: 'Уставіць',
+      export: 'Экспарт',
+      import: 'Імпарт',
       noTags: 'Без тэгаў',
       noTagsYet: 'Тэгаў пакуль няма',
       editRuleTags: 'Тэгі правіла',

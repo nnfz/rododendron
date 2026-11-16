@@ -171,6 +171,60 @@ export function nextPresetName(presets: RulePreset[], base: string): string {
   return `${trimmed} ${index}`;
 }
 
+export interface PresetFile {
+  name: string;
+  rules: Rule[];
+}
+
+export function presetFileName(name: string): string {
+  const cleaned = name
+    .trim()
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '')
+    .replace(/[. ]+$/g, '')
+    .trim();
+  const base = cleaned || 'preset';
+  return base.toLowerCase().endsWith('.json') ? base : `${base}.json`;
+}
+
+export function presetNameFromPath(path: string): string {
+  const base = path.split(/[/\\]/).pop() ?? '';
+  return base.replace(/\.json$/i, '').trim();
+}
+
+export function serializePresetFile(name: string, rules: Rule[]): string {
+  return JSON.stringify({
+    name,
+    rules: rules.map(rule => ({
+      id: rule.id,
+      app: rule.app,
+      rule: rule.rule,
+      active: rule.active,
+      ruleType: rule.ruleType,
+      ...(rule.tags?.length ? { tags: rule.tags } : {}),
+    })),
+  }, null, 2);
+}
+
+export function parsePresetFile(text: string, fallbackName: string): PresetFile | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text) as unknown;
+  } catch {
+    return null;
+  }
+  const fallback = fallbackName.trim() || 'Preset';
+  if (Array.isArray(parsed)) {
+    const rules = normalizeRuleList(parsed);
+    return rules.length > 0 ? { name: fallback, rules } : null;
+  }
+  if (!parsed || typeof parsed !== 'object' || !Array.isArray((parsed as Record<string, unknown>).rules)) return null;
+  const record = parsed as Record<string, unknown>;
+  const rules = normalizeRuleList(record.rules);
+  if (Array.isArray(record.rules) && record.rules.length > 0 && rules.length === 0) return null;
+  const name = typeof record.name === 'string' && record.name.trim() ? record.name.trim() : fallback;
+  return { name, rules };
+}
+
 export function parseStoredPresets(rawPresets: string | null, rawActiveId: string | null): StoredPresets | null {
   if (!rawPresets) return null;
   let parsed: unknown;

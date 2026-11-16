@@ -380,7 +380,9 @@ function ConnectionsPage({
   return (
     <div className="page-content">
       <div className="connections-header">
-        <h2 className="page-title">{t.connections.title}</h2>
+        <div className='page-header'>
+          <h2 className="page-title">{t.connections.title}</h2>
+        </div>
         <div className="connections-add">
           <button
             type="button"
@@ -425,11 +427,7 @@ function ConnectionsPage({
             const count = serverCount(entry);
             const subscription = entry?.subscription ?? null;
             const name = displayName(config, entry);
-            const singleName = subscription?.nodes.length === 1
-              ? subscription.nodes[0].name
-              : entry?.proxies?.length === 1
-                ? entry.proxies[0].name
-                : null;
+            const singleName = subscription?.nodes.length === 1 ? subscription.nodes[0].name : null;
             const canExpand = count !== null && count > 1;
             return (
               <div key={config.id} className={`connection-row ${selected ? 'selected' : ''} ${expanded ? 'expanded' : ''}`}>
@@ -452,7 +450,7 @@ function ConnectionsPage({
                       {entry ? (
                         <span>{subscription ? t.connections.typeSubscription : t.connections.typeLocal}</span>
                       ) : null}
-                      {count !== null ? <span>{t.connections.serverCount.replace('{count}', String(count))}</span> : null}
+                      {subscription && count !== null ? <span>{t.connections.serverCount.replace('{count}', String(count))}</span> : null}
                       {singleName ? <ServerName name={singleName} /> : null}
                       {subscription?.maskedUrl ? <span>{subscription.maskedUrl}</span> : null}
                       {subscription?.updatedAt ? <span>{subscription.updatedAt}</span> : null}
@@ -487,7 +485,7 @@ function ConnectionsPage({
                       {menuId === config.id && (
                         <>
                           <div className="connection-popover-backdrop" onClick={() => setMenuId(null)} />
-                          <div className="connection-popover" role="menu">
+                          <div className="connection-popover animate-slideDown" role="menu">
                             <button
                               type="button"
                               role="menuitem"

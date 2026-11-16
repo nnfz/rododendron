@@ -1,17 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
+import { LuPencil, LuPlus, LuTrash2 } from 'react-icons/lu';
 import { useI18n } from '../i18n';
 import { RULE_TEMPLATES, type RulePreset } from '../utils/rulePresets';
-import CustomSelect from './CustomSelect';
+import CustomSelect, { type SelectOption } from './CustomSelect';
 
 interface PresetBarProps {
   presets: RulePreset[];
   activePresetId: string;
-  canDelete: boolean;
   onSelect: (id: string) => void;
   onCreate: () => void;
-  onRename: (name: string) => void;
-  onDelete: () => void;
-  onAddTemplate: (templateId: string) => void;
+  onRename: (id: string, name: string) => void;
+  onDelete: (id: string) => void;
 }
 
 const TEMPLATE_LABEL = {
@@ -23,31 +22,110 @@ const TEMPLATE_LABEL = {
 function PresetBar({
   presets,
   activePresetId,
-  canDelete,
   onSelect,
   onCreate,
   onRename,
   onDelete,
-  onAddTemplate,
 }: PresetBarProps) {
   const { t } = useI18n();
-  const [renaming, setRenaming] = useState(false);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
-  const [deleteArmed, setDeleteArmed] = useState(false);
-  const [templatesOpen, setTemplatesOpen] = useState(false);
-  const templatesRef = useRef<HTMLDivElement | null>(null);
-  const active = presets.find(preset => preset.id === activePresetId);
+  const [deleteArmedId, setDeleteArmedId] = useState<string | null>(null);
+  const canDelete = presets.length > 1;
 
   useEffect(() => {
-    setDeleteArmed(false);
-    setRenaming(false);
+    setDeleteArmedId(null);
+    setRenamingId(null);
   }, [activePresetId]);
 
   useEffect(() => {
-    if (!deleteArmed) return;
-    const timer = window.setTimeout(() => setDeleteArmed(false), 2500);
+    if (!deleteArmedId) return;
+    const timer = window.setTimeout(() => setDeleteArmedId(null), 2500);
     return () => window.clearTimeout(timer);
-  }, [deleteArmed]);
+  }, [deleteArmedId]);
+
+  const commitRename = () => {
+    const next = renameDraft.trim();
+    const current = presets.find(preset => preset.id === renamingId);
+    if (renamingId && next && current && next !== current.name) onRename(renamingId, next);
+    setRenamingId(null);
+  };
+
+  const options: SelectOption[] = presets.map(preset => {
+    const armed = deleteArmedId === preset.id;
+    return {
+      value: preset.id,
+      label: preset.name,
+      trailing: [
+        {
+          key: 'edit',
+          label: t.rules.renamePreset,
+          icon: <LuPencil size={14} />,
+          onClick: () => {
+            setDeleteArmedId(null);
+            setRenameDraft(preset.name);
+            setRenamingId(preset.id);
+          },
+        },
+        {
+          key: 'delete',
+          label: armed ? t.rules.confirmDeletePreset : t.rules.deletePreset,
+          icon: <LuTrash2 size={14} />,
+          disabled: !canDelete,
+          danger: armed,
+          keepOpen: !armed,
+          onClick: () => {
+            if (!canDelete) return;
+            if (!armed) {
+              setDeleteArmedId(preset.id);
+              return;
+            }
+            setDeleteArmedId(null);
+            onDelete(preset.id);
+          },
+        },
+      ],
+    };
+  });
+
+  return (
+    <>
+      {renamingId ? (
+        <input
+          type="text"
+          className="input rules-preset-name"
+          value={renameDraft}
+          aria-label={t.rules.presetName}
+          autoFocus
+          onChange={event => setRenameDraft(event.target.value)}
+          onBlur={commitRename}
+          onKeyDown={event => {
+            if (event.key === 'Enter') commitRename();
+            if (event.key === 'Escape') setRenamingId(null);
+          }}
+        />
+      ) : (
+        <CustomSelect
+          value={activePresetId}
+          onChange={onSelect}
+          options={options}
+          className="rules-preset-select"
+          onOpenChange={open => {
+            if (!open) setDeleteArmedId(null);
+          }}
+        />
+      )}
+      <button type="button" className="btn btn-ghost-dark rules-header-add" onClick={onCreate} aria-label={t.rules.newPreset} title={t.rules.newPreset}>
+        <LuPlus size={18} />
+      </button>
+    </>
+  );
+}
+
+export function RuleTemplatesMenu({ onAddTemplate }: { onAddTemplate: (templateId: string) => void }) {
+  const { t } = useI18n();
+  const [templatesOpen, setTemplatesOpen] = useState(false);
+  const templatesRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!templatesOpen) return;
@@ -66,97 +144,32 @@ function PresetBar({
     };
   }, [templatesOpen]);
 
-  const commitRename = () => {
-    const next = renameDraft.trim();
-    if (next && active && next !== active.name) onRename(next);
-    setRenaming(false);
-  };
-
   return (
-    <div className="panel">
-      <div className="rules-preset-panel">
-        <div>
-          <div className="setting-label">{t.rules.preset}</div>
-          <div className="rules-preset-help">{t.rules.presetsHelp}</div>
+    <div className="preset-menu" ref={templatesRef}>
+      <button type="button" className="btn btn-ghost-dark" onClick={() => setTemplatesOpen(open => !open)}>
+        {t.rules.templates}
+      </button>
+      {templatesOpen ? (
+        <div className="preset-menu-popover" role="menu">
+          {RULE_TEMPLATES.map(template => {
+            const labelKey = TEMPLATE_LABEL[template.id as keyof typeof TEMPLATE_LABEL];
+            return (
+              <button
+                key={template.id}
+                type="button"
+                className="preset-menu-item"
+                role="menuitem"
+                onClick={() => {
+                  setTemplatesOpen(false);
+                  onAddTemplate(template.id);
+                }}
+              >
+                {t.rules[labelKey]}
+              </button>
+            );
+          })}
         </div>
-        <div className="rules-preset-controls">
-          {renaming ? (
-            <input
-              type="text"
-              className="input rules-preset-name"
-              value={renameDraft}
-              aria-label={t.rules.presetName}
-              autoFocus
-              onChange={event => setRenameDraft(event.target.value)}
-              onBlur={commitRename}
-              onKeyDown={event => {
-                if (event.key === 'Enter') commitRename();
-                if (event.key === 'Escape') setRenaming(false);
-              }}
-            />
-          ) : (
-            <CustomSelect
-              value={activePresetId}
-              onChange={onSelect}
-              options={presets.map(preset => ({ value: preset.id, label: preset.name }))}
-              className="rules-preset-select"
-            />
-          )}
-          <button type="button" className="btn btn-ghost-dark" onClick={onCreate}>{t.rules.newPreset}</button>
-          <button
-            type="button"
-            className="btn btn-ghost-dark"
-            onClick={() => {
-              setRenameDraft(active?.name ?? '');
-              setRenaming(true);
-            }}
-          >
-            {t.rules.renamePreset}
-          </button>
-          <button
-            type="button"
-            className={`btn btn-ghost-dark${deleteArmed ? ' btn-confirm-delete' : ''}`}
-            disabled={!canDelete}
-            onClick={() => {
-              if (!canDelete) return;
-              if (!deleteArmed) {
-                setDeleteArmed(true);
-                return;
-              }
-              setDeleteArmed(false);
-              onDelete();
-            }}
-          >
-            {deleteArmed ? t.rules.confirmDeletePreset : t.rules.deletePreset}
-          </button>
-          <div className="preset-menu" ref={templatesRef}>
-            <button type="button" className="btn btn-ghost-dark" onClick={() => setTemplatesOpen(open => !open)}>
-              {t.rules.templates}
-            </button>
-            {templatesOpen ? (
-              <div className="preset-menu-popover" role="menu">
-                {RULE_TEMPLATES.map(template => {
-                  const labelKey = TEMPLATE_LABEL[template.id as keyof typeof TEMPLATE_LABEL];
-                  return (
-                    <button
-                      key={template.id}
-                      type="button"
-                      className="preset-menu-item"
-                      role="menuitem"
-                      onClick={() => {
-                        setTemplatesOpen(false);
-                        onAddTemplate(template.id);
-                      }}
-                    >
-                      {t.rules[labelKey]}
-                    </button>
-                  );
-                })}
-              </div>
-            ) : null}
-          </div>
-        </div>
-      </div>
+      ) : null}
     </div>
   );
 }

@@ -12,6 +12,7 @@
         "@tauri-apps/plugin-notification": "^2",
         "@tauri-apps/plugin-opener": "^2",
         "@tauri-apps/plugin-shell": "^2.3.3",
+        "country-flag-icons": "^1.6.20",
         "react": "^19.1.0",
         "react-dom": "^19.1.0",
         "react-icons": "^4.10.1",
@@ -246,6 +247,8 @@
     "caniuse-lite": ["caniuse-lite@1.0.30001812", "", {}, "sha512-qN+QNNBr93TCmFrmte0bBCjSDMuRvt78VlHT99qIGPszm4QsqCX8lnyWUFkHi8B7ZBAPq8SH+UqyXNy/odMdng=="],
 
     "convert-source-map": ["convert-source-map@2.0.0", "", {}, "sha512-Kvp459HrV2FEJ1CAsi1Ku+MY3kasH19TFykTz2xWmMeq6bk2NU3XXvfJ+Q61m0xktWwt+1HSYf3JZsTms3aRJg=="],
+
+    "country-flag-icons": ["country-flag-icons@1.6.20", "", {}, "sha512-py8JiEKzjhYw6HPJ0L7SxLgCYim36UPRTZX43/kqGueUCZLSvnrqAiwW8HtQibur7mdkFQUkjOgdK+o/9FBtaw=="],
 
     "csstype": ["csstype@3.2.3", "", {}, "sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ=="],
 

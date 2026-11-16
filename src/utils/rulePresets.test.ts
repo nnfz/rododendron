@@ -6,8 +6,12 @@ import {
   memoryStore,
   mergeSavedAndParsedRules,
   nextPresetName,
+  parsePresetFile,
+  presetFileName,
+  presetNameFromPath,
   rulesFromTemplate,
   RULE_TEMPLATES,
+  serializePresetFile,
   withActiveRules,
   withoutPreset,
 } from './rulePresets.ts';
@@ -153,6 +157,23 @@ describe('preset edits', () => {
     assert.equal(removed.activeId, 'work');
     assert.equal(withoutPreset(removed, 'work'), removed);
     assert.equal(nextPresetName(removed.presets, 'Work'), 'Work 2');
+  });
+
+  it('writes a preset file and reads the name and rules back', () => {
+    const rules = [rule({ id: 3, app: 'chrome.exe', rule: 'Via VPN', tags: [2] })];
+    const text = serializePresetFile('Work: main', rules);
+    assert.equal(presetFileName('Work: main'), 'Work main.json');
+    assert.equal(presetNameFromPath('C:\\presets\\Work main.json'), 'Work main');
+    assert.deepEqual(parsePresetFile(text, 'Fallback'), {
+      name: 'Work: main',
+      rules,
+    });
+    assert.deepEqual(parsePresetFile(JSON.stringify(rules), 'From file'), {
+      name: 'From file',
+      rules,
+    });
+    assert.equal(parsePresetFile('{', 'Fallback'), null);
+    assert.equal(parsePresetFile(JSON.stringify({ name: 'Empty', rules: [{ app: '' }] }), 'Fallback'), null);
   });
 
   it('builds process rules from a template', () => {

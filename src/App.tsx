@@ -419,14 +419,22 @@ export default function App() {
   }, [vpnEnabled, vpnRunningConfigId, activeConfigId]);
 
   useEffect(() => {
-    if (!vpnEnabled || connectedConfigSnapshot) return;
+    if (!vpnEnabled) return;
     if (!parsedConfig || !activeConfigFilename || parsedConfigFilename !== activeConfigFilename) return;
-    setConnectedConfigSnapshot({
+    const next = {
       proxy_name: parsedConfig.proxy_name ?? null,
       server_address: parsedConfig.server_address ?? null,
       mixed_port: typeof parsedConfig.mixed_port === 'number' ? parsedConfig.mixed_port : null,
-    });
-  }, [vpnEnabled, connectedConfigSnapshot, parsedConfig, parsedConfigFilename, activeConfigFilename]);
+    };
+    setConnectedConfigSnapshot(prev => (
+      prev
+      && prev.proxy_name === next.proxy_name
+      && prev.server_address === next.server_address
+      && prev.mixed_port === next.mixed_port
+        ? prev
+        : next
+    ));
+  }, [vpnEnabled, parsedConfig, parsedConfigFilename, activeConfigFilename]);
 
   const selectedSubscriptionNode = useMemo(() => {
     const selectedId = subscriptionInfo?.selectedServerId;
@@ -440,20 +448,31 @@ export default function App() {
       const prevProxy = prev?.proxyName;
       const prevServer = prev?.serverName;
       const prevPort = prev?.port;
+      const parsedMatches = parsedConfigFilename === activeConfigFilename ? parsedConfig : null;
+      const onlyNode = subscriptionInfo?.nodes.length === 1 ? subscriptionInfo.nodes[0] : null;
+      const node = selectedSubscriptionNode ?? onlyNode;
+      // The name saved at connect time stays on vpnStatus until the window reloads.
+      // A subscription update already has the new node and parsed config.
+      const freshProxy = node?.name || parsedMatches?.proxy_name || null;
+      const freshServer = node?.server || parsedMatches?.server_address || null;
       if (vpnEnabled) {
-        const proxyName = selectedSubscriptionNode?.name || vpnStatus?.proxy_name || connectedConfigSnapshot?.proxy_name || prevProxy;
-        const serverName = selectedSubscriptionNode?.server || vpnStatus?.server || connectedConfigSnapshot?.server_address || prevServer;
+        const proxyName = freshProxy || vpnStatus?.proxy_name || connectedConfigSnapshot?.proxy_name || prevProxy;
+        const serverName = freshServer || vpnStatus?.server || connectedConfigSnapshot?.server_address || prevServer;
         const port = selectedSubscriptionNode?.port || vpnStatus?.port || connectedConfigSnapshot?.mixed_port || prevPort;
         if (!proxyName && !serverName && !port) return prev;
-        return { proxyName: proxyName || 'Unknown', serverName: serverName || 'Not configured', port: port || 7890 };
+        const next = { proxyName: proxyName || 'Unknown', serverName: serverName || 'Not configured', port: port || 7890 };
+        if (prev && prev.proxyName === next.proxyName && prev.serverName === next.serverName && prev.port === next.port) return prev;
+        return next;
       }
-      const proxyName = parsedConfig?.proxy_name || prevProxy;
-      const serverName = parsedConfig?.server_address || prevServer;
-      const port = parsedConfig?.mixed_port || prevPort;
+      const proxyName = freshProxy || prevProxy;
+      const serverName = freshServer || prevServer;
+      const port = parsedMatches?.mixed_port || prevPort;
       if (!proxyName && !serverName && !port) return prev;
-      return { proxyName: proxyName || 'Unknown', serverName: serverName || 'Not configured', port: port || 7890 };
+      const next = { proxyName: proxyName || 'Unknown', serverName: serverName || 'Not configured', port: port || 7890 };
+      if (prev && prev.proxyName === next.proxyName && prev.serverName === next.serverName && prev.port === next.port) return prev;
+      return next;
     });
-  }, [vpnEnabled, vpnStatus, connectedConfigSnapshot, parsedConfig, selectedSubscriptionNode]);
+  }, [vpnEnabled, vpnStatus, connectedConfigSnapshot, parsedConfig, parsedConfigFilename, activeConfigFilename, selectedSubscriptionNode, subscriptionInfo]);
 
   const restartVPN = useCallback(
     async (rulesOverride?: Rule[]) => {
@@ -818,8 +837,12 @@ export default function App() {
         onToggleSidebar={handleToggleSidebar}
         closeBehavior={settings.closeBehavior}
       />
-      {isNarrowLayout && sidebarOpen && (
-        <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} aria-hidden="true" />
+      {isNarrowLayout && (
+        <div
+          className={`sidebar-overlay ${sidebarOpen ? 'open' : ''}`}
+          onClick={() => setSidebarOpen(false)}
+          aria-hidden="true"
+        />
       )}
       <div className="app-container">
         <Sidebar

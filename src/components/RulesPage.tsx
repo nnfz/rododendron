@@ -1,14 +1,14 @@
 import { memo, useEffect, useState, useCallback, useMemo, useRef, useLayoutEffect, type Dispatch, type SetStateAction } from 'react';
 import { createPortal } from 'react-dom';
-import { LuPlus, LuTrash2, LuSearch, LuMonitor, LuGlobe, LuHash, LuX, LuChevronDown } from 'react-icons/lu';
+import { LuDownload, LuPlus, LuTrash2, LuSearch, LuMonitor, LuGlobe, LuHash, LuUpload, LuX, LuChevronDown } from 'react-icons/lu';
 
 import { useI18n } from '../i18n';
 
 import type { Rule, Tag } from '../types';
 import { isTauri } from '../utils/isTauri';
-import { nextPresetName, rulesFromTemplate, RULE_TEMPLATES, withoutPreset, type RulePreset } from '../utils/rulePresets';
+import { nextPresetName, parsePresetFile, presetFileName, presetNameFromPath, rulesFromTemplate, RULE_TEMPLATES, serializePresetFile, withoutPreset, type RulePreset } from '../utils/rulePresets';
 import CustomSelect from './CustomSelect';
-import PresetBar from './PresetBar';
+import PresetBar, { RuleTemplatesMenu } from './PresetBar';
 
 const TAG_COLOR_PRESETS = [
   '#ef4444','#f97316','#f59e0b','#eab308','#22c55e','#10b981','#14b8a6','#06b6d4',
@@ -72,20 +72,6 @@ function cssFromHexAlpha(hex: string, alpha: number): string {
   if (!rgb) return hex;
   if (a >= 0.999) return hex;
   return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${Math.round(a * 1000) / 1000})`;
-}
-
-function normalizeRuleFromClipboard(raw: unknown, fallbackId: number): Rule | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const r = raw as Record<string, unknown>;
-  const app = typeof r.app === 'string' ? r.app : '';
-  const rule = typeof r.rule === 'string' ? r.rule : '';
-  const active = typeof r.active === 'boolean' ? r.active : true;
-  const ruleType = r.ruleType;
-  const allowedTypes: Rule['ruleType'][] = ['process', 'domain', 'domain_keyword', 'ip'];
-  const normalizedType: Rule['ruleType'] = typeof ruleType === 'string' && (allowedTypes as string[]).includes(ruleType) ? (ruleType as Rule['ruleType']) : 'process';
-  if (!app.trim() || !rule.trim()) return null;
-  const id = typeof r.id === 'number' && Number.isFinite(r.id) ? r.id : fallbackId;
-  return { id, app, rule, active, ruleType: normalizedType };
 }
 
 function ColorPicker({ value, onChange, ariaLabel }: { value: string; onChange: (next: string) => void; ariaLabel: string }) {
@@ -210,7 +196,97 @@ type RuleType = 'process' | 'domain' | 'domain_keyword';
 interface ProcessInfo { name: string; pid: number; path?: string | null; icon?: string | null; }
 
 const RULE_TYPE_ICONS = { process: LuMonitor, domain: LuGlobe, domain_keyword: LuHash } as const;
-const RULE_TYPE_LABELS = { process: 'Process', domain: 'Domain', domain_keyword: 'Keyword' } as const;
+const RULE_ROW_BATCH = 80;
+
+function detectPlatform(): 'windows' | 'macos' | 'linux' | 'unknown' {
+  if (typeof navigator === 'undefined') return 'unknown';
+  const ua = navigator.userAgent.toLowerCase();
+  if (ua.includes('windows')) return 'windows';
+  if (ua.includes('mac os') || ua.includes('macos')) return 'macos';
+  if (ua.includes('linux')) return 'linux';
+  return 'unknown';
+}
+
+function readCollapsedGroups(): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(RULE_GROUPS_COLLAPSED_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return parsed as Record<string, boolean>;
+  } catch {
+    return {};
+  }
+}
+
+function ruleTypeLabel(type: string, labels: { process: string; domain: string; domainkey: string }): string {
+  if (type === 'process') return labels.process;
+  if (type === 'domain') return labels.domain;
+  if (type === 'domain_keyword') return labels.domainkey;
+  return type;
+}
+
+interface RuleRowProps {
+  rule: Rule;
+  tagsById: Map<number, Tag>;
+  onOpenTags: (ruleId: number, anchor: HTMLElement) => void;
+  onToggleDown: (id: number) => void;
+  onToggleEnter: (id: number) => void;
+  onToggleUp: () => void;
+  onDelete: (id: number) => void;
+}
+
+const RuleRow = memo(function RuleRow({ rule, tagsById, onOpenTags, onToggleDown, onToggleEnter, onToggleUp, onDelete }: RuleRowProps) {
+  const { t } = useI18n();
+  const Icon = RULE_TYPE_ICONS[rule.ruleType as keyof typeof RULE_TYPE_ICONS] || LuMonitor;
+  const tags = rule.tags || [];
+  return (
+    <div className="row grid-12">
+      <div className="col-span-2" style={GRID_CELL}>
+        <span className="rule-type-badge" style={TRUNCATE}>
+          <span className="rule-type-label">
+            <Icon size={14} />
+            <span style={TRUNCATE}>{ruleTypeLabel(rule.ruleType, t.rules)}</span>
+          </span>
+        </span>
+      </div>
+      <div className="col-span-3" style={GRID_CELL}>
+        <span className="rule-app" style={TRUNCATE} title={rule.app}>{rule.app}</span>
+      </div>
+      <div className="col-span-2" style={GRID_CELL}>
+        <button type="button" className="rule-tags-cell" onClick={e => onOpenTags(rule.id, e.currentTarget)}>
+          <div className="rule-tags-wrap">
+            {tags.map(tid => {
+              const tag = tagsById.get(tid);
+              if (!tag) return null;
+              const name = tag.name.length <= 8 ? tag.name : `${tag.name.slice(0, 8)}...`;
+              return <span key={tid} className="tag-chip" style={{ background: tag.color }} title={tag.name}>{name}</span>;
+            })}
+            {tags.length === 0 ? <span className="tag-chip tag-chip-empty">{t.rules.noTags}</span> : null}
+          </div>
+        </button>
+      </div>
+      <div className="col-span-2" style={GRID_CELL}>
+        <span className={`tag ${rule.rule === 'Via VPN' ? 'tag-proxy-active' : 'tag-proxy-inactive'}`} style={TRUNCATE}>
+          {rule.rule === 'Via VPN' ? t.rules.viaVpn : t.rules.direct}
+        </span>
+      </div>
+      <div className="col-span-2" style={GRID_CELL}>
+        <button
+          onMouseDown={() => onToggleDown(rule.id)}
+          onMouseEnter={() => onToggleEnter(rule.id)}
+          onMouseUp={onToggleUp}
+          className={`btn-pill ${rule.active ? 'active' : 'inactive'}`}
+        >
+          {rule.active ? t.rules.active : t.rules.inactive}
+        </button>
+      </div>
+      <div className="col-span-1 text-right" style={GRID_CELL}>
+        <button onClick={() => onDelete(rule.id)} className="btn btn-icon" aria-label={t.common.delete}><LuTrash2 size={18} /></button>
+      </div>
+    </div>
+  );
+});
 
 function RulesPage({
   rules,
@@ -229,7 +305,7 @@ function RulesPage({
   autoRestartOnRuleApply,
 }: RulesPageProps) {
   const { t } = useI18n();
-  const [osPlatform, setOsPlatform] = useState<'windows' | 'macos' | 'linux' | 'unknown'>('unknown');
+  const [osPlatform] = useState(detectPlatform);
   const [newRuleApp, setNewRuleApp] = useState('');
   const [newRuleType, setNewRuleType] = useState<RuleType>('process');
   const [newRuleAction, setNewRuleAction] = useState<'Via VPN' | 'Direct'>('Via VPN');
@@ -238,7 +314,9 @@ function RulesPage({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTagId, setSelectedTagId] = useState<number | null>(null);
   const [tagsExpanded, setTagsExpanded] = useState(false);
-  const [collapsedRuleGroups, setCollapsedRuleGroups] = useState<Record<string, boolean>>({});
+  const [collapsedRuleGroups, setCollapsedRuleGroups] = useState<Record<string, boolean>>(readCollapsedGroups);
+  const [rowLimit, setRowLimit] = useState(RULE_ROW_BATCH);
+  const rulesRef = useRef(rules);
   const [showTagsManager, setShowTagsManager] = useState(false);
   const [ruleTagsPopover, setRuleTagsPopover] = useState<null | { ruleId: number; top: number; left: number }>(null);
   const [isBulkToggling, setIsBulkToggling] = useState(false);
@@ -254,6 +332,8 @@ function RulesPage({
   const [isLoadingProcesses, setIsLoadingProcesses] = useState(false);
   const [processSearchQuery, setProcessSearchQuery] = useState('');
 
+  rulesRef.current = rules;
+
   const tagsById = useMemo(() => { const m = new Map<number, Tag>(); for (const tag of tags) m.set(tag.id, tag); return m; }, [tags]);
 
   const tagsForFilterBar = useMemo(() => {
@@ -265,43 +345,7 @@ function RulesPage({
     return selected ? [...base, selected] : base;
   }, [tags, tagsExpanded, selectedTagId, tagsById]);
 
-  useEffect(() => {
-    if (!isTauri()) return;
-    const ua = navigator.userAgent.toLowerCase();
-    if (ua.includes('windows')) setOsPlatform('windows');
-    else if (ua.includes('mac os') || ua.includes('macos')) setOsPlatform('macos');
-    else if (ua.includes('linux')) setOsPlatform('linux');
-    else setOsPlatform('unknown');
-  }, []);
-
-  useEffect(() => {
-    try { const raw = localStorage.getItem(RULE_GROUPS_COLLAPSED_KEY); if (!raw) return; const parsed = JSON.parse(raw) as unknown; if (parsed && typeof parsed === 'object') setCollapsedRuleGroups(parsed as Record<string, boolean>); } catch {}
-  }, []);
-
   useEffect(() => { try { localStorage.setItem(RULE_GROUPS_COLLAPSED_KEY, JSON.stringify(collapsedRuleGroups)); } catch {} }, [collapsedRuleGroups]);
-
-  const copyRulesToClipboard = useCallback(async () => {
-    try { await navigator.clipboard.writeText(JSON.stringify(rules.map(({ tags: _tags, ...rest }) => rest))); } catch (e) { console.error('Failed to copy rules:', e); }
-  }, [rules]);
-
-  const pasteRulesFromClipboard = useCallback(async () => {
-    try {
-      const text = await navigator.clipboard.readText();
-      if (!text.trim()) return;
-      const parsed = JSON.parse(text) as unknown;
-      const candidate = Array.isArray(parsed) ? parsed : parsed && typeof parsed === 'object' && Array.isArray((parsed as Record<string, unknown>).rules) ? (parsed as Record<string, unknown>).rules as unknown[] : null;
-      if (!candidate) return;
-      const base = Date.now();
-      const normalized: Rule[] = [];
-      for (let i = 0; i < candidate.length; i++) { const r = normalizeRuleFromClipboard(candidate[i], base + i); if (r) normalized.push(r); }
-      if (normalized.length === 0) return;
-      const usedIds = new Set<number>();
-      const deduped: Rule[] = [];
-      for (let i = 0; i < normalized.length; i++) { let next = normalized[i]; while (usedIds.has(next.id)) next = { ...next, id: base + normalized.length + i }; usedIds.add(next.id); deduped.push(next); }
-      setRuleTagsPopover(null); ruleTagsAnchorRef.current = null;
-      setRules(deduped);
-    } catch (e) { console.error('Failed to paste rules:', e); }
-  }, [setRules]);
 
   const loadProcesses = useCallback(async () => {
     if (!isTauri()) return;
@@ -313,19 +357,32 @@ function RulesPage({
   const selectProcess = useCallback((processName: string) => { setNewRuleApp(processName); setShowProcessScanner(false); setProcessSearchQuery(''); }, []);
 
   const toggleRule = useCallback(async (id: number, bulkValue?: boolean) => {
-    const targetRule = rules.find(r => r.id === id);
+    const current = rulesRef.current;
+    const targetRule = current.find(r => r.id === id);
     if (!targetRule) return;
     const nextActive = bulkValue !== undefined ? bulkValue : !targetRule.active;
-    const nextRules = rules.map(r => r.id === id ? { ...r, active: nextActive } : r);
+    const nextRules = current.map(r => r.id === id ? { ...r, active: nextActive } : r);
     setRules(nextRules); setLastToggledId(id);
     if (vpnEnabled && autoRestartOnRuleApply) { await new Promise(resolve => setTimeout(resolve, 500)); await restartVPN(nextRules); }
-  }, [rules, setRules, vpnEnabled, restartVPN, autoRestartOnRuleApply]);
+  }, [setRules, vpnEnabled, restartVPN, autoRestartOnRuleApply]);
+
+  const bulkToggleRef = useRef({ on: false, lastId: null as number | null });
+  bulkToggleRef.current.on = isBulkToggling;
+  bulkToggleRef.current.lastId = lastToggledId;
 
   const handleRuleMouseEnter = useCallback((id: number) => {
-    if (!isBulkToggling || lastToggledId === id) return;
-    const lastRule = rules.find(r => r.id === lastToggledId);
-    if (lastRule) toggleRule(id, lastRule.active);
-  }, [isBulkToggling, lastToggledId, rules, toggleRule]);
+    const { on, lastId } = bulkToggleRef.current;
+    if (!on || lastId === id) return;
+    const lastRule = rulesRef.current.find(r => r.id === lastId);
+    if (lastRule) void toggleRule(id, lastRule.active);
+  }, [toggleRule]);
+
+  const handleRuleToggleDown = useCallback((id: number) => {
+    setIsBulkToggling(true);
+    void toggleRule(id);
+  }, [toggleRule]);
+
+  const handleRuleToggleUp = useCallback(() => { setIsBulkToggling(false); }, []);
 
   const isValidProcessTarget = useCallback((raw: string): boolean => {
     const s = raw.trim(); if (!s) return false; const lower = s.toLowerCase();
@@ -338,10 +395,10 @@ function RulesPage({
   const triggerNewRuleInputError = useCallback(() => { setNewRuleInputError(true); setNewRuleInputShake(true); setTimeout(() => setNewRuleInputShake(false), 400); }, []);
 
   const deleteRule = useCallback(async (id: number) => {
-    const nextRules = rules.filter(r => r.id !== id);
+    const nextRules = rulesRef.current.filter(r => r.id !== id);
     setRules(nextRules);
     if (vpnEnabled && autoRestartOnRuleApply) await restartVPN(nextRules);
-  }, [rules, setRules, vpnEnabled, restartVPN, autoRestartOnRuleApply]);
+  }, [setRules, vpnEnabled, restartVPN, autoRestartOnRuleApply]);
 
   const addRule = useCallback(async () => {
     const normalizeTarget = (raw: string) => { const trimmed = raw.trim(); if (!trimmed) return ''; return (newRuleType === 'domain' || newRuleType === 'domain_keyword') ? trimmed.toLowerCase() : trimmed; };
@@ -474,6 +531,16 @@ function RulesPage({
     });
   }, [rules, searchQuery, selectedTagId]);
 
+  useEffect(() => { setRowLimit(RULE_ROW_BATCH); }, [searchQuery, selectedTagId, activePresetId]);
+
+  useEffect(() => {
+    if (rowLimit >= filteredRules.length) return;
+    const id = window.requestAnimationFrame(() => {
+      setRowLimit(limit => Math.min(filteredRules.length, limit + RULE_ROW_BATCH));
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [rowLimit, filteredRules.length]);
+
   const ruleGroups = useMemo(() => {
     type Group = { key: string; title: string; color: string | null; rules: Rule[] };
     const map = new Map<string, Group>();
@@ -494,14 +561,9 @@ function RulesPage({
 
   const filteredProcesses = useMemo(() => processes.filter(p => p.name.toLowerCase().includes(processSearchQuery.toLowerCase())), [processes, processSearchQuery]);
 
-  const getRuleTypeLabel = useCallback((type: string) => RULE_TYPE_LABELS[type as keyof typeof RULE_TYPE_LABELS] || type, []);
   const getRuleTypeLabelPlaceholder = useCallback((type: string) => {
     switch (type) { case 'process': return osPlatform === 'windows' ? 'chrome.exe' : 'Google Chrome'; case 'domain': return 'youtube.com'; case 'domain_keyword': return 'youtube'; default: return type; }
   }, [osPlatform]);
-  const getRuleTypeIcon = useCallback((type: string) => { const Icon = RULE_TYPE_ICONS[type as keyof typeof RULE_TYPE_ICONS] || LuMonitor; return <Icon size={14} />; }, []);
-  const getAppNameTranslation = useCallback((appName: string) => {
-    switch (appName) { case 'process': return t.rules.process; case 'domain': return t.rules.domain; case 'domain_keyword': return t.rules.domainkey; default: return appName; }
-  }, [t.rules]);
 
   const ruleActionOptions = useMemo(() => [
     { value: 'Via VPN', label: t.rules.viaVpn },
@@ -511,6 +573,48 @@ function RulesPage({
   const applyPresetRules = useCallback((nextRules: Rule[]) => {
     if (vpnEnabled && autoRestartOnRuleApply) void restartVPN(nextRules);
   }, [autoRestartOnRuleApply, restartVPN, vpnEnabled]);
+
+  const exportPreset = useCallback(async () => {
+    const preset = presets.find(item => item.id === activePresetId);
+    const name = preset?.name || t.rules.preset;
+    const json = serializePresetFile(name, rules);
+    try {
+      if (!isTauri()) return;
+      const { save } = await import('@tauri-apps/plugin-dialog');
+      const { writeTextFile } = await import('@tauri-apps/plugin-fs');
+      const filePath = await save({
+        title: t.rules.export,
+        defaultPath: presetFileName(name),
+        filters: [{ name: 'JSON', extensions: ['json'] }],
+      });
+      if (!filePath) return;
+      await writeTextFile(filePath, json);
+    } catch (error) {
+      console.error('Failed to export preset:', error);
+    }
+  }, [activePresetId, presets, rules, t.rules.export, t.rules.preset]);
+
+  const importPreset = useCallback(async () => {
+    try {
+      if (!isTauri()) return;
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const { readTextFile } = await import('@tauri-apps/plugin-fs');
+      const selected = await open({
+        title: t.rules.import,
+        multiple: false,
+        filters: [{ name: 'JSON', extensions: ['json'] }],
+      });
+      if (typeof selected !== 'string') return;
+      const parsed = parsePresetFile(await readTextFile(selected), presetNameFromPath(selected) || t.rules.preset);
+      if (!parsed) return;
+      onCreatePreset(nextPresetName(presets, parsed.name), parsed.rules);
+      applyPresetRules(parsed.rules);
+      setRuleTagsPopover(null);
+      ruleTagsAnchorRef.current = null;
+    } catch (error) {
+      console.error('Failed to import preset:', error);
+    }
+  }, [applyPresetRules, onCreatePreset, presets, t.rules.import, t.rules.preset]);
 
   const handleSelectPreset = useCallback((id: string) => {
     if (id === activePresetId) return;
@@ -537,17 +641,17 @@ function RulesPage({
     applyPresetRules(nextRules);
   }, [applyPresetRules, onCreatePreset, presets, t.rules.templateBrowsers, t.rules.templateLaunchers, t.rules.templateMessengers]);
 
-  const handleDeletePreset = useCallback(() => {
-    const next = withoutPreset({ presets, activeId: activePresetId }, activePresetId);
-    onDeletePreset(activePresetId);
-    if (next.activeId === activePresetId) return;
+  const handleDeletePreset = useCallback((id: string) => {
+    const next = withoutPreset({ presets, activeId: activePresetId }, id);
+    onDeletePreset(id);
+    if (id !== activePresetId || next.activeId === id) return;
     const preset = next.presets.find(item => item.id === next.activeId);
     if (preset) applyPresetRules(preset.rules);
   }, [activePresetId, applyPresetRules, onDeletePreset, presets]);
 
-  const handleRenamePreset = useCallback((name: string) => {
-    onRenamePreset(activePresetId, name);
-  }, [activePresetId, onRenamePreset]);
+  const handleRenamePreset = useCallback((id: string, name: string) => {
+    onRenamePreset(id, name);
+  }, [onRenamePreset]);
 
   if (!presetsReady) {
     return (
@@ -563,23 +667,21 @@ function RulesPage({
     <div className="page-content" ref={pageContentRef} onMouseUp={() => setIsBulkToggling(false)} onMouseLeave={() => setIsBulkToggling(false)}>
       <div className="page-header">
         <h2 className="page-title">{t.rules.title}</h2>
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button type="button" className="btn btn-ghost-dark" onClick={copyRulesToClipboard}>{t.rules.copy}</button>
-          <button type="button" className="btn btn-ghost-dark" onClick={pasteRulesFromClipboard}>{t.rules.paste}</button>
+        <div className="rules-header-actions">
+          <PresetBar
+            presets={presets}
+            activePresetId={activePresetId}
+            onSelect={handleSelectPreset}
+            onCreate={handleCreatePreset}
+            onRename={handleRenamePreset}
+            onDelete={handleDeletePreset}
+          />
+          <button type="button" className="btn btn-ghost-dark rules-header-add" onClick={importPreset} aria-label={t.rules.import} title={t.rules.import}><LuDownload size={18} /></button>
+          <button type="button" className="btn btn-ghost-dark rules-header-add" onClick={exportPreset} aria-label={t.rules.export} title={t.rules.export}><LuUpload size={18} /></button>
         </div>
       </div>
 
       <div className="container-narrow">
-        <PresetBar
-          presets={presets}
-          activePresetId={activePresetId}
-          canDelete={presets.length > 1}
-          onSelect={handleSelectPreset}
-          onCreate={handleCreatePreset}
-          onRename={handleRenamePreset}
-          onDelete={handleDeletePreset}
-          onAddTemplate={handleAddTemplate}
-        />
         <div className="panel">
           <div className="add-rule-form">
             <div className="add-rule-type-selector">
@@ -593,6 +695,7 @@ function RulesPage({
                   onChange={e => { setNewRuleApp(e.target.value); setNewRuleInputError(false); }} onKeyPress={handleKeyPress}
                   className={`input ${newRuleInputError ? 'input-error' : ''} ${newRuleInputShake ? 'input-shake' : ''}`} style={{ width: '100%' }} />
               </div>
+              <RuleTemplatesMenu onAddTemplate={handleAddTemplate} />
               <CustomSelect value={newRuleAction} onChange={(val) => setNewRuleAction(val as 'Via VPN' | 'Direct')} options={ruleActionOptions} className="add-rule-select" style={{ width: '10rem' }} />
               {newRuleType === 'process' && isTauri() && (
                 <button onClick={openProcessScanner} className="btn btn-ghost-dark"><LuSearch size={18} />{t.rules.scan}</button>
@@ -641,71 +744,42 @@ function RulesPage({
               <div className="col-span-1 text-right" style={GRID_CELL}>{t.rules.actions}</div>
             </div>
 
-            {ruleGroups.map(group => {
-              const collapsed = !!collapsedRuleGroups[group.key];
-              const toggleGroup = () => setCollapsedRuleGroups(prev => ({ ...prev, [group.key]: !prev[group.key] }));
-              return (
-                <div key={group.key} className="rules-group">
-                  <div className="rules-group-header-row">
-                    <button type="button" className={`rules-group-toggle ${collapsed ? 'collapsed' : ''}`} onClick={toggleGroup} aria-label={collapsed ? 'Expand group' : 'Collapse group'}>
-                      <LuChevronDown size={16} className="rules-group-chevron" />
-                    </button>
-                    <div className="rules-group-title" title={group.title} onClick={toggleGroup} role="button" tabIndex={0}
-                      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleGroup(); } }}>
-                      {group.color ? <span className="rules-group-dot" style={{ background: group.color }} /> : null}
-                      <span className="rules-group-name">{group.title}</span>
-                      <span className="rules-group-count">{group.rules.length}</span>
+            {(() => {
+              let budget = rowLimit;
+              return ruleGroups.map(group => {
+                const collapsed = !!collapsedRuleGroups[group.key];
+                const visible = collapsed ? [] : group.rules.slice(0, Math.max(0, budget));
+                if (!collapsed) budget -= visible.length;
+                const toggleGroup = () => setCollapsedRuleGroups(prev => ({ ...prev, [group.key]: !prev[group.key] }));
+                return (
+                  <div key={group.key} className="rules-group">
+                    <div className="rules-group-header-row">
+                      <button type="button" className={`rules-group-toggle ${collapsed ? 'collapsed' : ''}`} onClick={toggleGroup} aria-label={collapsed ? 'Expand group' : 'Collapse group'}>
+                        <LuChevronDown size={16} className="rules-group-chevron" />
+                      </button>
+                      <div className="rules-group-title" title={group.title} onClick={toggleGroup} role="button" tabIndex={0}
+                        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleGroup(); } }}>
+                        {group.color ? <span className="rules-group-dot" style={{ background: group.color }} /> : null}
+                        <span className="rules-group-name">{group.title}</span>
+                        <span className="rules-group-count">{group.rules.length}</span>
+                      </div>
                     </div>
+                    {visible.map(rule => (
+                      <RuleRow
+                        key={rule.id}
+                        rule={rule}
+                        tagsById={tagsById}
+                        onOpenTags={openRuleTagsPopover}
+                        onToggleDown={handleRuleToggleDown}
+                        onToggleEnter={handleRuleMouseEnter}
+                        onToggleUp={handleRuleToggleUp}
+                        onDelete={deleteRule}
+                      />
+                    ))}
                   </div>
-                  {collapsed ? null : group.rules.map(rule => (
-                    <div key={rule.id} className="row grid-12">
-                      <div className="col-span-2" style={GRID_CELL}>
-                        <span className="rule-type-badge" style={TRUNCATE}>
-                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
-                            {getRuleTypeIcon(rule.ruleType)}
-                            <span style={TRUNCATE}>{getRuleTypeLabel(getAppNameTranslation(rule.ruleType))}</span>
-                          </span>
-                        </span>
-                      </div>
-                      <div className="col-span-3" style={GRID_CELL}>
-                        <span className="rule-app" style={TRUNCATE} title={rule.app}>{rule.app}</span>
-                      </div>
-                      <div className="col-span-2" style={GRID_CELL}>
-                        <button type="button" className="rule-tags-cell" onClick={e => openRuleTagsPopover(rule.id, e.currentTarget)} style={{ minWidth: 0, maxWidth: '100%' }}>
-                          <div className="rule-tags-wrap" style={{ overflow: 'hidden' }}>
-                            {(rule.tags || []).map(tid => {
-                              const tag = tagsById.get(tid);
-                              if (!tag) return null;
-                              return <span key={tid} className="tag-chip" style={{ background: tag.color }} title={tag.name}>{formatTagName(tag.name)}</span>;
-                            })}
-                            {(rule.tags || []).length === 0 ? <span className="tag-chip tag-chip-empty">{t.rules.noTags}</span> : null}
-                          </div>
-                        </button>
-                      </div>
-                      <div className="col-span-2" style={GRID_CELL}>
-                        <span className={`tag ${rule.rule === 'Via VPN' ? 'tag-proxy-active' : 'tag-proxy-inactive'}`} style={TRUNCATE}>
-                          {rule.rule === 'Via VPN' ? t.rules.viaVpn : t.rules.direct}
-                        </span>
-                      </div>
-                      <div className="col-span-2" style={GRID_CELL}>
-                        <button
-                          onMouseDown={() => { setIsBulkToggling(true); toggleRule(rule.id); }}
-                          onMouseEnter={() => handleRuleMouseEnter(rule.id)}
-                          onMouseUp={() => setIsBulkToggling(false)}
-                          className={`btn-pill ${rule.active ? 'active' : 'inactive'}`}
-                          style={{ userSelect: 'none' }}
-                        >
-                          {rule.active ? t.rules.active : t.rules.inactive}
-                        </button>
-                      </div>
-                      <div className="col-span-1 text-right" style={GRID_CELL}>
-                        <button onClick={() => deleteRule(rule.id)} className="btn btn-icon"><LuTrash2 size={18} /></button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              );
-            })}
+                );
+              });
+            })()}
           </div>
         ) : (
           <div className="panel">
